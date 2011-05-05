@@ -225,11 +225,13 @@ class Stores(object):
 		user_store = os.path.join(basedir.xdg_cache_home, '0install.net', 'implementations')
 		self.stores = [Store(user_store)]
 
-		impl_dirs = basedir.load_first_config('0install.net', 'injector',
+		impl_dirs_files = basedir.load_config_paths('0install.net', 'injector',
 							  'implementation-dirs')
-		debug(_("Location of 'implementation-dirs' config file being used: '%s'"), impl_dirs)
-		if impl_dirs:
-			dirs = file(impl_dirs)
+		if impl_dirs_files:
+			dirs = []
+			for impl_dirs in impl_dirs_files:
+				debug(_("Location of 'implementation-dirs' config file being used: '%s'"), impl_dirs)
+				dirs.extend(file(impl_dirs))
 		else:
 			if os.name == "nt":
 				from win32com.shell import shell, shellcon
