@@ -284,6 +284,21 @@ class TestDownload(BaseTest):
 		finally:
 			sys.stdout = old_out
 
+	def testRecipeUnpack(self):
+		old_out = sys.stdout
+		try:
+			sys.stdout = StringIO()
+			self.child = server.handle_requests(('doubly_packed.tar'))
+			policy = Policy(os.path.abspath('Unpack.xml'), config = self.config)
+			try:
+				download_and_execute(policy, [])
+				assert False
+			except model.SafeException, ex:
+				if "HelloWorld/Missing" not in str(ex):
+					raise ex
+		finally:
+			sys.stdout = old_out
+
 	def testSymlink(self):
 		old_out = sys.stdout
 		try:

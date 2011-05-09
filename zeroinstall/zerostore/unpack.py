@@ -61,24 +61,30 @@ _pola_run = None
 #else:
 #	info('pola-run not found; archive extraction will not be sandboxed')
 
-def type_from_url(url):
-	"""Guess the MIME type for this resource based on its URL. Returns None if we don't know what it is."""
-	url = url.lower()
-	if url.endswith('.rpm'): return 'application/x-rpm'
-	if url.endswith('.deb'): return 'application/x-deb'
-	if url.endswith('.tar.bz2'): return 'application/x-bzip-compressed-tar'
-	if url.endswith('.tar.gz'): return 'application/x-compressed-tar'
-	if url.endswith('.tar.lzma'): return 'application/x-lzma-compressed-tar'
-	if url.endswith('.tar.xz'): return 'application/x-xz-compressed-tar'
-	if url.endswith('.tbz'): return 'application/x-bzip-compressed-tar'
-	if url.endswith('.tgz'): return 'application/x-compressed-tar'
-	if url.endswith('.tlz'): return 'application/x-lzma-compressed-tar'
-	if url.endswith('.txz'): return 'application/x-xz-compressed-tar'
-	if url.endswith('.tar'): return 'application/x-tar'
-	if url.endswith('.zip'): return 'application/zip'
-	if url.endswith('.cab'): return 'application/vnd.ms-cab-compressed'
-	if url.endswith('.dmg'): return 'application/x-apple-diskimage'
-	if url.endswith('.gem'): return 'application/x-ruby-gem'
+def type_from_filename(name):
+	''' 
+	Guess the MIME type for this resource based on its name. 
+
+	Returns None if we don't know what it is.
+
+	@ivar name string that ends in a filename
+	'''
+	name = name.lower()
+	if name.endswith('.rpm'): return 'application/x-rpm'
+	if name.endswith('.deb'): return 'application/x-deb'
+	if name.endswith('.tar.bz2'): return 'application/x-bzip-compressed-tar'
+	if name.endswith('.tar.gz'): return 'application/x-compressed-tar'
+	if name.endswith('.tar.lzma'): return 'application/x-lzma-compressed-tar'
+	if name.endswith('.tar.xz'): return 'application/x-xz-compressed-tar'
+	if name.endswith('.tbz'): return 'application/x-bzip-compressed-tar'
+	if name.endswith('.tgz'): return 'application/x-compressed-tar'
+	if name.endswith('.tlz'): return 'application/x-lzma-compressed-tar'
+	if name.endswith('.txz'): return 'application/x-xz-compressed-tar'
+	if name.endswith('.tar'): return 'application/x-tar'
+	if name.endswith('.zip'): return 'application/zip'
+	if name.endswith('.cab'): return 'application/vnd.ms-cab-compressed'
+	if name.endswith('.dmg'): return 'application/x-apple-diskimage'
+	if name.endswith('.gem'): return 'application/x-ruby-gem'
 	return None
 
 def check_type_ok(mime_type):
@@ -137,7 +143,7 @@ def _exec_maybe_sandboxed(writable, prog, *args):
 		pola_args += ['-fw', writable]
 	os.execl(_pola_run, _pola_run, *pola_args)
 
-def unpack_archive_over(url, data, destdir, extract = None, type = None, start_offset = 0):
+def unpack_archive_over(archive, data, destdir, extract = None, type = None, start_offset = 0):
 	"""Like unpack_archive, except that we unpack to a temporary directory first and
 	then move things over, checking that we're not following symlinks at each stage.
 	Use this when you want to unpack an unarchive into a directory which already has
@@ -150,7 +156,7 @@ def unpack_archive_over(url, data, destdir, extract = None, type = None, start_o
 	try:
 		mtimes = []
 
-		unpack_archive(url, data, tmpdir, extract, type, start_offset)
+		unpack_archive(archive, data, tmpdir, extract, type, start_offset)
 
 		if extract is None:
 			srcdir = tmpdir
@@ -194,12 +200,15 @@ def unpack_archive_over(url, data, destdir, extract = None, type = None, start_o
 	finally:
 		ro_rmtree(tmpdir)
 
-def unpack_archive(url, data, destdir, extract = None, type = None, start_offset = 0):
+def unpack_archive(archive, data, destdir, extract = None, type = None, start_offset = 0):
 	"""Unpack stream 'data' into directory 'destdir'. If extract is given, extract just
 	that sub-directory from the archive (i.e. destdir/extract will exist afterwards).
-	Works out the format from the name."""
-	if type is None: type = type_from_url(url)
-	if type is None: raise SafeException(_("Unknown extension (and no MIME type given) in '%s'") % url)
+	Works out the format from the name.
+
+	@ivar archive Path or url to the archive
+	"""
+	if type is None: type = type_from_filename(archive)
+	if type is None: raise SafeException(_("Unknown extension (and no MIME type given) in '%s'") % archive)
 	if type == 'application/x-bzip-compressed-tar':
 		extract_tar(data, destdir, extract, 'bzip2', start_offset)
 	elif type == 'application/x-deb':
@@ -223,7 +232,7 @@ def unpack_archive(url, data, destdir, extract = None, type = None, start_offset
 	elif type == 'application/x-ruby-gem':
 		extract_gem(data, destdir, extract, start_offset)
 	else:
-		raise SafeException(_('Unknown MIME type "%(type)s" for "%(url)s"') % {'type': type, 'url': url})
+		raise SafeException(_('Unknown MIME type "%(type)s" for "%(url)s"') % {'type': type, 'url': archive})
 
 def extract_deb(stream, destdir, extract = None, start_offset = 0):
 	if extract:

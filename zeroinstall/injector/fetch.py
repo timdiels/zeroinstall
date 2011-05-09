@@ -103,36 +103,23 @@ class Fetcher(object):
 		@see: L{download_impl} uses this method when appropriate"""
 		# Maybe we're taking this metaphor too far?
 
-		# Start downloading all the ingredients.
-		streams = {}	# Streams collected from successful downloads
-
-		# Start a download for each ingredient
-		blockers = []
-		for step in recipe.steps:
-			blocker, stream = self.download_archive(step, force = force, impl_hint = impl_hint)
-			assert stream
-			blockers.append(blocker)
-			streams[step] = stream
-
-		while blockers:
-			yield blockers
-			tasks.check(blockers)
-			blockers = [b for b in blockers if not b.happened]
-
-		from zeroinstall.zerostore import unpack
+		# Start preparing all steps
+		blockers = [step.prepare(self, force, impl_hint) for step in recipe.steps]
 
 		# Create an empty directory for the new implementation
 		store = stores.stores[0]
 		tmpdir = store.get_tmp_dir_for(required_digest)
+
 		try:
-			# Unpack each of the downloaded archives into it in turn
-			for step in recipe.steps:
-				stream = streams[step]
-				stream.seek(0)
-				unpack.unpack_archive_over(step.url, stream, tmpdir,
-						extract = step.extract,
-						type = step.type,
-						start_offset = step.start_offset or 0)
+			# Run steps
+			valid_blockers = [b for b in blockers if b is not None]
+			for step, blocker in zip(recipe.steps, blockers):
+				if blocker:
+					while not blocker.happened:
+						yield valid_blockers
+						tasks.check(valid_blockers)
+				step.run(tmpdir)
+
 			# Check that the result is correct and store it in the cache
 			store.check_manifest_and_rename(required_digest, tmpdir)
 			tmpdir = None
@@ -375,7 +362,7 @@ class Fetcher(object):
 
 		mime_type = download_source.type
 		if not mime_type:
-			mime_type = unpack.type_from_url(download_source.url)
+			mime_type = unpack.type_from_filename(download_source.url)
 		if not mime_type:
 			raise SafeException(_("No 'type' attribute on archive, and I can't guess from the name (%s)") % download_source.url)
 		unpack.check_type_ok(mime_type)

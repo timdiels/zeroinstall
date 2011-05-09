@@ -64,7 +64,7 @@ def do_add(args):
 		else:
 			extract = None
 
-		type = unpack.type_from_url(args[1])
+		type = unpack.type_from_filename(args[1])
 		if not type:
 			raise SafeException(_("Unknown extension in '%s' - can't guess MIME type") % args[1])
 		unpack.check_type_ok(type)

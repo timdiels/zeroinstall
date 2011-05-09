@@ -19,6 +19,7 @@ from logging import info, debug, warn
 from zeroinstall import SafeException, version
 from zeroinstall.injector.namespaces import XMLNS_IFACE
 from zeroinstall.injector import qdom
+from zeroinstall.zerostore import unpack
 
 # Element names for bindings in feed files
 binding_names = frozenset(['environment', 'overlay'])
@@ -403,7 +404,7 @@ class RetrievalMethod(object):
 
 class DownloadSource(RetrievalMethod):
 	"""A DownloadSource provides a way to fetch an implementation."""
-	__slots__ = ['implementation', 'url', 'size', 'extract', 'start_offset', 'type']
+	__slots__ = ['implementation', 'url', 'size', 'extract', 'start_offset', 'type', '_stream']
 
 	def __init__(self, implementation, url, size, extract, start_offset = 0, type = None):
 		self.implementation = implementation
@@ -412,6 +413,44 @@ class DownloadSource(RetrievalMethod):
 		self.extract = extract
 		self.start_offset = start_offset
 		self.type = type		# MIME type - see unpack.py
+		self._stream = None
+
+	def prepare(self, fetcher, force, impl_hint):
+		blocker, self._stream = fetcher.download_archive(self, force = force, impl_hint = impl_hint)
+		assert self._stream, 'lol'
+		return blocker
+
+	def run(self, tmpdir):
+		assert self._stream, 'You must prepare the download step first'
+		self._stream.seek(0)
+		unpack.unpack_archive_over(self.url, self._stream, tmpdir,
+			extract = self.extract,
+			type = self.type,
+			start_offset = self.start_offset or 0)
+
+class UnpackArchive(object):
+	"""An UnpachArchive step provides unpacks/extracts an archive.
+
+	It can be used inside a Recipe."""
+	__slots__ = ['path', 'extract', 'type']
+
+	def __init__(self, path, extract, type):
+		self.path = path
+		self.extract = extract
+		self.type = type
+
+	def prepare(self, fetcher, force, impl_hint):
+		return None
+
+	def run(self, tmpdir):
+		path = os.path.join(tmpdir, self.path)
+		stream = open(path, 'rb')
+		stream.seek(0)
+
+		unpack.unpack_archive_over(path, stream, tmpdir,
+		extract = self.extract,
+		type = self.type,
+		start_offset = 0)
 
 class Recipe(RetrievalMethod):
 	"""Get an implementation by following a series of steps.
@@ -995,6 +1034,13 @@ class ZeroInstallFeed(object):
 									extract = recipe_step.getAttribute('extract'),
 									start_offset = _get_long(recipe_step, 'start-offset'),
 									type = recipe_step.getAttribute('type')))
+						elif recipe_step.uri == XMLNS_IFACE and recipe_step.name == 'unpack':
+							path = recipe_step.getAttribute('path')
+							if not path:
+								raise InvalidInterface(_("Missing path attribute on <unpack>"))
+							recipe.steps.append(UnpackArchive(path = path,
+								extract = recipe_step.getAttribute('extract'),
+								type = recipe_step.getAttribute('type')))
 						else:
 							info(_("Unknown step '%s' in recipe; skipping recipe"), recipe_step.name)
 							break
