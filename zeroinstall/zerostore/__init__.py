@@ -225,8 +225,8 @@ class Stores(object):
 		user_store = os.path.join(basedir.xdg_cache_home, '0install.net', 'implementations')
 		self.stores = [Store(user_store)]
 
-		impl_dirs_files = basedir.load_config_paths('0install.net', 'injector',
-							  'implementation-dirs')
+		impl_dirs_files = list(basedir.load_config_paths('0install.net', 'injector',
+							  'implementation-dirs'))
 		if impl_dirs_files:
 			dirs = []
 			for impl_dirs in impl_dirs_files:
