@@ -429,7 +429,7 @@ class DownloadSource(RetrievalMethod):
 			start_offset = self.start_offset or 0)
 
 class UnpackArchive(object):
-	"""An UnpachArchive step provides unpacks/extracts an archive.
+	"""An UnpackArchive step provides unpacks/extracts an archive.
 
 	It can be used inside a Recipe."""
 	__slots__ = ['path', 'extract', 'type']
