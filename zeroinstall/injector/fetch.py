@@ -362,7 +362,7 @@ class Fetcher(object):
 
 		mime_type = download_source.type
 		if not mime_type:
-			mime_type = unpack.type_from_filename(download_source.url)
+			mime_type = unpack.type_from_url(download_source.url)
 		if not mime_type:
 			raise SafeException(_("No 'type' attribute on archive, and I can't guess from the name (%s)") % download_source.url)
 		unpack.check_type_ok(mime_type)
