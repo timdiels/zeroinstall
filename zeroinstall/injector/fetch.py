@@ -104,7 +104,7 @@ class Fetcher(object):
 		# Maybe we're taking this metaphor too far?
 
 		# Start preparing all steps
-		blockers = [step.prepare(self, force, impl_hint) for step in recipe.steps]
+		step_commands = [step.prepare(self, force, impl_hint) for step in recipe.steps]
 
 		# Create an empty directory for the new implementation
 		store = stores.stores[0]
@@ -112,13 +112,13 @@ class Fetcher(object):
 
 		try:
 			# Run steps
-			valid_blockers = [b for b in blockers if b is not None]
-			for step, blocker in zip(recipe.steps, blockers):
-				if blocker:
-					while not blocker.happened:
+			valid_blockers = [s.blocker for s in step_commands if s.blocker is not None]
+			for step_command in step_commands:
+				if step_command.blocker:
+					while not step_command.blocker.happened:
 						yield valid_blockers
 						tasks.check(valid_blockers)
-				step.run(tmpdir)
+				step_command.run(tmpdir)
 
 			# Check that the result is correct and store it in the cache
 			store.check_manifest_and_rename(required_digest, tmpdir)

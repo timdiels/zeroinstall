@@ -404,7 +404,7 @@ class RetrievalMethod(object):
 
 class DownloadSource(RetrievalMethod):
 	"""A DownloadSource provides a way to fetch an implementation."""
-	__slots__ = ['implementation', 'url', 'size', 'extract', 'start_offset', 'type', '_stream']
+	__slots__ = ['implementation', 'url', 'size', 'extract', 'start_offset', 'type']
 
 	def __init__(self, implementation, url, size, extract, start_offset = 0, type = None):
 		self.implementation = implementation
@@ -413,20 +413,23 @@ class DownloadSource(RetrievalMethod):
 		self.extract = extract
 		self.start_offset = start_offset
 		self.type = type		# MIME type - see unpack.py
-		self._stream = None
 
 	def prepare(self, fetcher, force, impl_hint):
-		blocker, self._stream = fetcher.download_archive(self, force = force, impl_hint = impl_hint)
-		assert self._stream, 'lol'
-		return blocker
 
-	def run(self, tmpdir):
-		assert self._stream, 'You must prepare the download step first'
-		self._stream.seek(0)
-		unpack.unpack_archive_over(self.url, self._stream, tmpdir,
-			extract = self.extract,
-			type = self.type,
-			start_offset = self.start_offset or 0)
+		class StepCommand(object):
+			__slots__ = ['blocker', '_stream']
+
+			def __init__(s):
+				s.blocker, s._stream = fetcher.download_archive(self, force = force, impl_hint = impl_hint)
+
+			def run(s, tmpdir):
+				s._stream.seek(0)
+				unpack.unpack_archive_over(self.url, s._stream, tmpdir,
+					extract = self.extract,
+					type = self.type,
+					start_offset = self.start_offset or 0)
+		return StepCommand()
+
 
 class UnpackArchive(object):
 	"""An UnpackArchive step provides unpacks/extracts an archive.
@@ -440,17 +443,23 @@ class UnpackArchive(object):
 		self.type = type
 
 	def prepare(self, fetcher, force, impl_hint):
-		return None
 
-	def run(self, tmpdir):
-		path = os.path.join(tmpdir, self.path)
-		stream = open(path, 'rb')
-		stream.seek(0)
+		class StepCommand(object):
+			__slots__ = ['blocker']
 
-		unpack.unpack_archive_over(path, stream, tmpdir,
-		extract = self.extract,
-		type = self.type,
-		start_offset = 0)
+			def __init__(s):
+				s.blocker = None
+
+			def run(s, tmpdir):
+				path = os.path.join(tmpdir, self.path)
+				stream = open(path, 'rb')
+				stream.seek(0)
+
+				unpack.unpack_archive_over(path, stream, tmpdir,
+					extract = self.extract,
+					type = self.type,
+					start_offset = 0)
+		return StepCommand()
 
 class Recipe(RetrievalMethod):
 	"""Get an implementation by following a series of steps.
