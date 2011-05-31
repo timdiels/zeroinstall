@@ -459,6 +459,9 @@ class UnpackArchive(object):
 					extract = self.extract,
 					type = self.type,
 					start_offset = 0)
+
+				os.unlink(path)
+
 		return StepCommand()
 
 class Recipe(RetrievalMethod):

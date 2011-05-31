@@ -3,7 +3,7 @@
   <name>Unpack</name>
   <summary>Unpack</summary>
   <description>Unpack</description>
-  <implementation id='sha1=a5b5802c440d5d14d35c1db43182b17e6ab991d4' version='0.1' main='HelloWorld/Missing'>
+  <implementation id='sha1=3ce644dc725f1d21cfcf02562c76f375944b266a' version='0.1' main='HelloWorld/Missing'>
     <recipe>
      <archive href='http://localhost:8000/doubly_packed.tar' size='10240' />
      <unpack path='HelloWorld.tar.bz2' size='185' type='application/x-bzip-compressed-tar'/>
