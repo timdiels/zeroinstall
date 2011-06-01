@@ -403,6 +403,13 @@ class RetrievalMethod(object):
 	"""A RetrievalMethod provides a way to fetch an implementation."""
 	__slots__ = []
 
+	@tasks.async
+	def retrieve(self, fetcher, required_digest, stores, force = False, impl_hint = None):
+		"""Retrieve implementation using method
+		@param impl_hint: the Implementation this is for (if any) as a hint for the GUI
+		"""
+		raise NotImplementedError("abstract")
+
 class DownloadSource(RetrievalMethod):
 	"""A DownloadSource provides a way to fetch an implementation."""
 	__slots__ = ['implementation', 'url', 'size', 'extract', 'start_offset', 'type']
@@ -447,6 +454,16 @@ class DownloadSource(RetrievalMethod):
 		dl = fetcher.handler.get_download(self.url, force = force, hint = impl_hint)
 		dl.expected_size = self.size + (self.start_offset or 0)
 		return (dl.downloaded, dl.tempfile)
+
+	@tasks.async
+	def retrieve(self, fetcher, required_digest, stores, force = False, impl_hint = None):
+		blocker, stream = self.download(fetcher, force = force, impl_hint = impl_hint)
+		yield blocker
+		tasks.check(blocker)
+
+		stream.seek(0)
+		stores.add_archive_to_cache(required_digest, stream, self.url, self.extract,
+					type = self.type, start_offset = self.start_offset or 0)
 
 
 class UnpackArchive(object):
@@ -497,9 +514,6 @@ class Recipe(RetrievalMethod):
 
 	@tasks.async
 	def retrieve(self, fetcher, required_digest, stores, force = False, impl_hint = None):
-		"""Retrieve implementation using method
-		@param impl_hint: the Implementation this is for (if any) as a hint for the GUI
-		"""
 		# Start preparing all steps
 		step_commands = [step.prepare(fetcher, force, impl_hint) for step in self.steps]
 
@@ -803,19 +817,9 @@ class ZeroInstallImplementation(Implementation):
 
 		@tasks.async
 		def retrieve():
-			if isinstance(retrieval_method, DownloadSource):
-				blocker, stream = fetcher.download_archive(retrieval_method, force = force, impl_hint = self)
-				yield blocker
-				tasks.check(blocker)
-
-				stream.seek(0)
-				stores.add_archive_to_cache(required_digest, stream, retrieval_method.url, retrieval_method.extract,
-							type = retrieval_method.type, start_offset = retrieval_method.start_offset or 0)
-			else:
-				blocker = retrieval_method.retrieve(fetcher, required_digest, stores, force, impl_hint = self)
-				yield blocker
-				tasks.check(blocker)
-
+			blocker = retrieval_method.retrieve(fetcher, required_digest, stores, force, impl_hint = self)
+			yield blocker
+			tasks.check(blocker)
 			fetcher.handler.impl_added_to_store(self)
 		return retrieve()
 
