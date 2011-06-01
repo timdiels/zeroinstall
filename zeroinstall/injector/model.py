@@ -707,6 +707,23 @@ class ZeroInstallImplementation(Implementation):
 			return path is not None
 		return False	# (0compile creates fake entries with no digests)
 
+	@property
+	def best_digest(self):
+		"""Return the best digest for this implementation
+		@return: tuple (alg, digest) or None"""
+		from zeroinstall.zerostore import manifest
+		best_alg = None
+		for digest in self.digests:
+			alg_name = digest.split('=', 1)[0]
+			alg = manifest.algorithms.get(alg_name, None)
+			if alg and (best_alg is None or best_alg.rating < alg.rating):
+				best_alg = alg
+				best_digest = digest
+		if best_alg:
+			return (best_alg, best_digest)
+		else:
+			return None
+
 class Interface(object):
 	"""An Interface represents some contract of behaviour.
 	@ivar uri: the URI for this interface.

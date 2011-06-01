@@ -311,14 +311,7 @@ class Fetcher(object):
 		if isinstance(retrieval_method, DistributionSource):
 			return retrieval_method.install(self.handler)
 
-		from zeroinstall.zerostore import manifest
-		best = None
-		for digest in impl.digests:
-			alg_name = digest.split('=', 1)[0]
-			alg = manifest.algorithms.get(alg_name, None)
-			if alg and (best is None or best.rating < alg.rating):
-				best = alg
-				required_digest = digest
+		best = impl.best_digest
 
 		if best is None:
 			if not impl.digests:
@@ -326,6 +319,8 @@ class Fetcher(object):
 						{'implementation': impl.feed.get_name(), 'version': impl.get_version()})
 			raise SafeException(_("Unknown digest algorithms '%(algorithms)s' for '%(implementation)s' version %(version)s") %
 					{'algorithms': impl.digests, 'implementation': impl.feed.get_name(), 'version': impl.get_version()})
+		else:
+			alg, required_digest = best
 
 		@tasks.async
 		def download_impl():
