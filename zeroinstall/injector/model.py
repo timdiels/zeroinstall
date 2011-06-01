@@ -404,8 +404,9 @@ class RetrievalMethod(object):
 	__slots__ = []
 
 	@tasks.async
-	def retrieve(self, fetcher, required_digest, stores, force = False, impl_hint = None):
+	def retrieve(self, fetcher, destination, force = False, impl_hint = None):
 		"""Retrieve implementation using method
+		@param destination: where to put the retrieved files
 		@param impl_hint: the Implementation this is for (if any) as a hint for the GUI
 		"""
 		raise NotImplementedError("abstract")
@@ -428,11 +429,11 @@ class DownloadSource(RetrievalMethod):
 			__slots__ = ['blocker', '_stream']
 
 			def __init__(s):
-				s.blocker, s._stream = fetcher.download_archive(self, force = force, impl_hint = impl_hint)
+				s.blocker, s._stream = self.download(fetcher, force = force, impl_hint = impl_hint)
 
-			def run(s, tmpdir):
+			def run(s, destination):
 				s._stream.seek(0)
-				unpack.unpack_archive_over(self.url, s._stream, tmpdir,
+				unpack.unpack_archive_over(self.url, s._stream, destination,
 					extract = self.extract,
 					type = self.type,
 					start_offset = self.start_offset or 0)
@@ -456,14 +457,11 @@ class DownloadSource(RetrievalMethod):
 		return (dl.downloaded, dl.tempfile)
 
 	@tasks.async
-	def retrieve(self, fetcher, required_digest, stores, force = False, impl_hint = None):
-		blocker, stream = self.download(fetcher, force = force, impl_hint = impl_hint)
-		yield blocker
-		tasks.check(blocker)
-
-		stream.seek(0)
-		stores.add_archive_to_cache(required_digest, stream, self.url, self.extract,
-					type = self.type, start_offset = self.start_offset or 0)
+	def retrieve(self, fetcher, destination, force = False, impl_hint = None):
+		command = self.prepare(fetcher, force, impl_hint)
+		yield command.blocker
+		tasks.check(command.blocker)
+		command.run(destination)
 
 
 class UnpackArchive(object):
@@ -513,34 +511,18 @@ class Recipe(RetrievalMethod):
 	size = property(lambda self: sum([x.size for x in self.steps]))
 
 	@tasks.async
-	def retrieve(self, fetcher, required_digest, stores, force = False, impl_hint = None):
+	def retrieve(self, fetcher, destination, force = False, impl_hint = None):
 		# Start preparing all steps
 		step_commands = [step.prepare(fetcher, force, impl_hint) for step in self.steps]
 
-		# Create an empty directory for the new implementation
-		store = stores.stores[0]
-		tmpdir = store.get_tmp_dir_for(required_digest)
-
-		try:
-			# Run steps
-			valid_blockers = [s.blocker for s in step_commands if s.blocker is not None]
-			for step_command in step_commands:
-				if step_command.blocker:
-					while not step_command.blocker.happened:
-						yield valid_blockers
-						tasks.check(valid_blockers)
-				step_command.run(tmpdir)
-
-			# Check that the result is correct and store it in the cache
-			store.check_manifest_and_rename(required_digest, tmpdir)
-			tmpdir = None
-		finally:
-			# If unpacking fails, remove the temporary directory
-			if tmpdir is not None:
-				from zeroinstall import support
-				support.ro_rmtree(tmpdir)
-
-
+		# Run steps
+		valid_blockers = [s.blocker for s in step_commands if s.blocker is not None]
+		for step_command in step_commands:
+			if step_command.blocker:
+				while not step_command.blocker.happened:
+					yield valid_blockers
+					tasks.check(valid_blockers)
+			step_command.run(destination)
 
 class DistributionSource(RetrievalMethod):
 	"""A package that is installed using the distribution's tools (including PackageKit).
@@ -817,10 +799,27 @@ class ZeroInstallImplementation(Implementation):
 
 		@tasks.async
 		def retrieve():
-			blocker = retrieval_method.retrieve(fetcher, required_digest, stores, force, impl_hint = self)
-			yield blocker
-			tasks.check(blocker)
+			# Create an empty directory for the new implementation
+			store = stores.stores[0]
+			tmpdir = store.get_tmp_dir_for(required_digest)
+
+			try:
+				blocker = retrieval_method.retrieve(fetcher, tmpdir, force, impl_hint = self)
+				yield blocker
+				tasks.check(blocker)
+
+				# Check that the result is correct and store it in the cache
+				store.check_manifest_and_rename(required_digest, tmpdir)
+
+				tmpdir = None
+			finally:
+				# If unpacking fails, remove the temporary directory
+				if tmpdir is not None:
+					from zeroinstall import support
+					support.ro_rmtree(tmpdir)
+
 			fetcher.handler.impl_added_to_store(self)
+
 		return retrieve()
 
 

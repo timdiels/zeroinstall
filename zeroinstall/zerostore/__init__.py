@@ -85,6 +85,7 @@ class Store:
 			raise NonwritableStore(str(ex))
 	
 	def add_archive_to_cache(self, required_digest, data, url, extract = None, type = None, start_offset = 0, try_helper = False):
+		# Note: probably no longer used, perhaps deprecate?
 		from . import unpack
 		info(_("Caching new implementation (digest %s) in %s"), required_digest, self.dir)
 

@@ -98,10 +98,12 @@ class Fetcher(object):
 
 	def cook(self, required_digest, recipe, stores, force = False, impl_hint = None):
 		"""Follow a Recipe.
+		@deprecated: use impl.retrieve() instead
 		@param impl_hint: the Implementation this is for (if any) as a hint for the GUI
 		@see: L{download_impl} uses this method when appropriate"""
 		# Maybe we're taking this metaphor too far?
-		return recipe.retrieve(self, required_digest, stores, force, impl_hint)
+		# Note: unused
+		return impl_hint.retrieve(self, recipe, stores, force)
 		
 
 	def get_feed_mirror(self, url):
@@ -289,6 +291,7 @@ class Fetcher(object):
 		"""Fetch an archive. You should normally call L{download_impl}
 		instead, since it handles other kinds of retrieval method too.
 		@deprecated: use download_source.download instead"""
+		# Note: unused
 		return download_source.download(self, force, impl_hint)
 
 	def download_icon(self, interface, force = False):
