@@ -653,6 +653,16 @@ class Implementation(object):
 			return self.download_sources[0]
 		return None
 
+	def retrieve(self, fetcher, retrieval_method, stores, force = False):
+		"""Retrieve an implementation.
+		@param retrieval_method: a way of getting the implementation (e.g. an Archive or a Recipe)
+		@type retrieval_method: L{model.RetrievalMethod}
+		@param stores: where to store the downloaded implementation
+		@type stores: L{zerostore.Stores}
+		@param force: whether to abort and restart an existing download
+		@rtype: L{tasks.Blocker}"""
+		raise NotImplementedError("abstract")
+
 class DistributionImplementation(Implementation):
 	"""An implementation provided by the distribution. Information such as the version
 	comes from the package manager.
@@ -671,6 +681,10 @@ class DistributionImplementation(Implementation):
 
 	def is_available(self, stores):
 		return self.installed
+
+	def retrieve(self, fetcher, retrieval_method, stores, force = False):
+		return retrieval_method.install(fetcher.handler)
+
 
 class ZeroInstallImplementation(Implementation):
 	"""An implementation where all the information comes from Zero Install.
@@ -726,13 +740,6 @@ class ZeroInstallImplementation(Implementation):
 			return None
 
 	def retrieve(self, fetcher, retrieval_method, stores, force = False):
-		"""Retrieve an implementation.
-		@param retrieval_method: a way of getting the implementation (e.g. an Archive or a Recipe)
-		@type retrieval_method: L{model.RetrievalMethod}
-		@param stores: where to store the downloaded implementation
-		@type stores: L{zerostore.Stores}
-		@param force: whether to abort and restart an existing download
-		@rtype: L{tasks.Blocker}"""
 		best = self.best_digest
 
 		if best is None:

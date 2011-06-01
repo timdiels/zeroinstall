@@ -297,6 +297,7 @@ class Fetcher(object):
 
 	def download_impl(self, impl, retrieval_method, stores, force = False):
 		"""Download an implementation.
+		@deprecated: use impl.retrieve(...) instead
 		@param impl: the selected implementation
 		@type impl: L{model.ZeroInstallImplementation}
 		@param retrieval_method: a way of getting the implementation (e.g. an Archive or a Recipe)
@@ -307,10 +308,6 @@ class Fetcher(object):
 		@rtype: L{tasks.Blocker}"""
 		assert impl
 		assert retrieval_method
-
-		if isinstance(retrieval_method, DistributionSource):
-			return retrieval_method.install(self.handler)
-
 		return impl.retrieve(self, retrieval_method, stores, force)
 
 	def _add_to_cache(self, required_digest, stores, retrieval_method, stream):
