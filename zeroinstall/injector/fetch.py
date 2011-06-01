@@ -287,8 +287,9 @@ class Fetcher(object):
 
 	def download_archive(self, download_source, force = False, impl_hint = None):
 		"""Fetch an archive. You should normally call L{download_impl}
-		instead, since it handles other kinds of retrieval method too."""
-		return download_source.retrieve(self, force, impl_hint)
+		instead, since it handles other kinds of retrieval method too.
+		@deprecated: use download_source.download instead"""
+		return download_source.download(self, force, impl_hint)
 
 	def download_icon(self, interface, force = False):
 		"""Download an icon for this interface and add it to the

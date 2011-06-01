@@ -431,8 +431,8 @@ class DownloadSource(RetrievalMethod):
 					start_offset = self.start_offset or 0)
 		return StepCommand()
 
-	def retrieve(self, fetcher, force = False, impl_hint = None):
-		"""Retrieve an archive. You should normally call L{Implementation.retrieve}
+	def download(self, fetcher, force = False, impl_hint = None):
+		"""Fetch an archive. You should normally call L{Implementation.retrieve}
 		instead, since it handles other kinds of retrieval method too."""
 		url = self.url
 		if not (url.startswith('http:') or url.startswith('https:') or url.startswith('ftp:')):
@@ -447,7 +447,6 @@ class DownloadSource(RetrievalMethod):
 		dl = fetcher.handler.get_download(self.url, force = force, hint = impl_hint)
 		dl.expected_size = self.size + (self.start_offset or 0)
 		return (dl.downloaded, dl.tempfile)
-
 
 
 class UnpackArchive(object):
@@ -811,13 +810,11 @@ class ZeroInstallImplementation(Implementation):
 
 				stream.seek(0)
 				stores.add_archive_to_cache(required_digest, stream, retrieval_method.url, retrieval_method.extract,
-							 type = retrieval_method.type, start_offset = retrieval_method.start_offset or 0)
-			elif isinstance(retrieval_method, Recipe):
-				blocker = fetcher.cook(required_digest, retrieval_method, stores, force, impl_hint = self)
+							type = retrieval_method.type, start_offset = retrieval_method.start_offset or 0)
+			else:
+				blocker = retrieval_method.retrieve(fetcher, required_digest, stores, force, impl_hint = self)
 				yield blocker
 				tasks.check(blocker)
-			else:
-				raise Exception(_("Unknown download type for '%s'") % retrieval_method)
 
 			fetcher.handler.impl_added_to_store(self)
 		return retrieve()
