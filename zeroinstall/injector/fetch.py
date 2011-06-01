@@ -11,7 +11,7 @@ from logging import info, debug, warn
 
 from zeroinstall.support import tasks, basedir
 from zeroinstall.injector.namespaces import XMLNS_IFACE, config_site
-from zeroinstall.injector.model import DownloadSource, Recipe, SafeException, escape, DistributionSource
+from zeroinstall.injector.model import DownloadSource, SafeException, escape, DistributionSource
 from zeroinstall.injector.iface_cache import PendingFeed, ReplayAttack
 from zeroinstall.injector.handler import NoTrustedKeys
 from zeroinstall.injector import download
@@ -309,11 +309,6 @@ class Fetcher(object):
 		assert impl
 		assert retrieval_method
 		return impl.retrieve(self, retrieval_method, stores, force)
-
-	def _add_to_cache(self, required_digest, stores, retrieval_method, stream):
-		assert isinstance(retrieval_method, DownloadSource)
-		stores.add_archive_to_cache(required_digest, stream, retrieval_method.url, retrieval_method.extract,
-						 type = retrieval_method.type, start_offset = retrieval_method.start_offset or 0)
 
 	def download_archive(self, download_source, force = False, impl_hint = None):
 		"""Fetch an archive. You should normally call L{download_impl}

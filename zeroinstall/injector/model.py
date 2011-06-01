@@ -759,7 +759,8 @@ class ZeroInstallImplementation(Implementation):
 				tasks.check(blocker)
 
 				stream.seek(0)
-				fetcher._add_to_cache(required_digest, stores, retrieval_method, stream)
+				stores.add_archive_to_cache(required_digest, stream, retrieval_method.url, retrieval_method.extract,
+							 type = retrieval_method.type, start_offset = retrieval_method.start_offset or 0)
 			elif isinstance(retrieval_method, Recipe):
 				blocker = fetcher.cook(required_digest, retrieval_method, stores, force, impl_hint = self)
 				yield blocker
@@ -769,6 +770,7 @@ class ZeroInstallImplementation(Implementation):
 
 			fetcher.handler.impl_added_to_store(self)
 		return retrieve()
+
 
 class Interface(object):
 	"""An Interface represents some contract of behaviour.
