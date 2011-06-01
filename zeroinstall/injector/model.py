@@ -644,6 +644,14 @@ class Implementation(object):
 		"""
 		raise NotImplementedError("abstract")
 
+	@property
+	def best_download_source(self):
+		"""Return the best download source for this implementation.
+		@rtype: L{model.RetrievalMethod}"""
+		if self.download_sources:
+			return self.download_sources[0]
+		return None
+
 class DistributionImplementation(Implementation):
 	"""An implementation provided by the distribution. Information such as the version
 	comes from the package manager.

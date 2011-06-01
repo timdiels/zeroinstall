@@ -484,8 +484,8 @@ class Fetcher(object):
 
 	def get_best_source(self, impl):
 		"""Return the best download source for this implementation.
-		@rtype: L{model.RetrievalMethod}"""
-		if impl.download_sources:
-			return impl.download_sources[0]
-		return None
+		@rtype: L{model.RetrievalMethod}
+		@deprecated: use impl.best_download_source instead
+		"""
+		return impl.best_download_source
 
