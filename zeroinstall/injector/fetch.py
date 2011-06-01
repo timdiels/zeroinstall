@@ -311,35 +311,7 @@ class Fetcher(object):
 		if isinstance(retrieval_method, DistributionSource):
 			return retrieval_method.install(self.handler)
 
-		best = impl.best_digest
-
-		if best is None:
-			if not impl.digests:
-				raise SafeException(_("No <manifest-digest> given for '%(implementation)s' version %(version)s") %
-						{'implementation': impl.feed.get_name(), 'version': impl.get_version()})
-			raise SafeException(_("Unknown digest algorithms '%(algorithms)s' for '%(implementation)s' version %(version)s") %
-					{'algorithms': impl.digests, 'implementation': impl.feed.get_name(), 'version': impl.get_version()})
-		else:
-			alg, required_digest = best
-
-		@tasks.async
-		def download_impl():
-			if isinstance(retrieval_method, DownloadSource):
-				blocker, stream = self.download_archive(retrieval_method, force = force, impl_hint = impl)
-				yield blocker
-				tasks.check(blocker)
-
-				stream.seek(0)
-				self._add_to_cache(required_digest, stores, retrieval_method, stream)
-			elif isinstance(retrieval_method, Recipe):
-				blocker = self.cook(required_digest, retrieval_method, stores, force, impl_hint = impl)
-				yield blocker
-				tasks.check(blocker)
-			else:
-				raise Exception(_("Unknown download type for '%s'") % retrieval_method)
-
-			self.handler.impl_added_to_store(impl)
-		return download_impl()
+		return impl.retrieve(self, retrieval_method, stores, force)
 
 	def _add_to_cache(self, required_digest, stores, retrieval_method, stream):
 		assert isinstance(retrieval_method, DownloadSource)

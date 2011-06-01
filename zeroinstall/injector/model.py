@@ -20,6 +20,7 @@ from zeroinstall import SafeException, version
 from zeroinstall.injector.namespaces import XMLNS_IFACE
 from zeroinstall.injector import qdom
 from zeroinstall.zerostore import unpack
+from zeroinstall.support import tasks
 
 # Element names for bindings in feed files
 binding_names = frozenset(['environment', 'overlay'])
@@ -723,6 +724,44 @@ class ZeroInstallImplementation(Implementation):
 			return (best_alg, best_digest)
 		else:
 			return None
+
+	def retrieve(self, fetcher, retrieval_method, stores, force = False):
+		"""Retrieve an implementation.
+		@param retrieval_method: a way of getting the implementation (e.g. an Archive or a Recipe)
+		@type retrieval_method: L{model.RetrievalMethod}
+		@param stores: where to store the downloaded implementation
+		@type stores: L{zerostore.Stores}
+		@param force: whether to abort and restart an existing download
+		@rtype: L{tasks.Blocker}"""
+		best = self.best_digest
+
+		if best is None:
+			if not self.digests:
+				raise SafeException(_("No <manifest-digest> given for '%(implementation)s' version %(version)s") %
+						{'implementation': self.feed.get_name(), 'version': self.get_version()})
+			raise SafeException(_("Unknown digest algorithms '%(algorithms)s' for '%(implementation)s' version %(version)s") %
+					{'algorithms': self.digests, 'implementation': self.feed.get_name(), 'version': self.get_version()})
+		else:
+			alg, required_digest = best
+
+		@tasks.async
+		def retrieve():
+			if isinstance(retrieval_method, DownloadSource):
+				blocker, stream = fetcher.download_archive(retrieval_method, force = force, impl_hint = self)
+				yield blocker
+				tasks.check(blocker)
+
+				stream.seek(0)
+				fetcher._add_to_cache(required_digest, stores, retrieval_method, stream)
+			elif isinstance(retrieval_method, Recipe):
+				blocker = fetcher.cook(required_digest, retrieval_method, stores, force, impl_hint = self)
+				yield blocker
+				tasks.check(blocker)
+			else:
+				raise Exception(_("Unknown download type for '%s'") % retrieval_method)
+
+			fetcher.handler.impl_added_to_store(self)
+		return retrieve()
 
 class Interface(object):
 	"""An Interface represents some contract of behaviour.
