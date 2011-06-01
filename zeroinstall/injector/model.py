@@ -478,6 +478,39 @@ class Recipe(RetrievalMethod):
 	
 	size = property(lambda self: sum([x.size for x in self.steps]))
 
+	@tasks.async
+	def retrieve(self, fetcher, required_digest, stores, force = False, impl_hint = None):
+		"""Retrieve implementation using method
+		@param impl_hint: the Implementation this is for (if any) as a hint for the GUI
+		"""
+		# Start preparing all steps
+		step_commands = [step.prepare(fetcher, force, impl_hint) for step in self.steps]
+
+		# Create an empty directory for the new implementation
+		store = stores.stores[0]
+		tmpdir = store.get_tmp_dir_for(required_digest)
+
+		try:
+			# Run steps
+			valid_blockers = [s.blocker for s in step_commands if s.blocker is not None]
+			for step_command in step_commands:
+				if step_command.blocker:
+					while not step_command.blocker.happened:
+						yield valid_blockers
+						tasks.check(valid_blockers)
+				step_command.run(tmpdir)
+
+			# Check that the result is correct and store it in the cache
+			store.check_manifest_and_rename(required_digest, tmpdir)
+			tmpdir = None
+		finally:
+			# If unpacking fails, remove the temporary directory
+			if tmpdir is not None:
+				from zeroinstall import support
+				support.ro_rmtree(tmpdir)
+
+
+
 class DistributionSource(RetrievalMethod):
 	"""A package that is installed using the distribution's tools (including PackageKit).
 	@ivar install: a function to call to install this package

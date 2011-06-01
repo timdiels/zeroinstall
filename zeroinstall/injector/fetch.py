@@ -11,7 +11,7 @@ from logging import info, debug, warn
 
 from zeroinstall.support import tasks, basedir
 from zeroinstall.injector.namespaces import XMLNS_IFACE, config_site
-from zeroinstall.injector.model import DownloadSource, SafeException, escape, DistributionSource
+from zeroinstall.injector.model import SafeException, escape, DistributionSource
 from zeroinstall.injector.iface_cache import PendingFeed, ReplayAttack
 from zeroinstall.injector.handler import NoTrustedKeys
 from zeroinstall.injector import download
@@ -96,38 +96,13 @@ class Fetcher(object):
 	def handler(self):
 		return self.config.handler
 
-	@tasks.async
 	def cook(self, required_digest, recipe, stores, force = False, impl_hint = None):
 		"""Follow a Recipe.
 		@param impl_hint: the Implementation this is for (if any) as a hint for the GUI
 		@see: L{download_impl} uses this method when appropriate"""
 		# Maybe we're taking this metaphor too far?
-
-		# Start preparing all steps
-		step_commands = [step.prepare(self, force, impl_hint) for step in recipe.steps]
-
-		# Create an empty directory for the new implementation
-		store = stores.stores[0]
-		tmpdir = store.get_tmp_dir_for(required_digest)
-
-		try:
-			# Run steps
-			valid_blockers = [s.blocker for s in step_commands if s.blocker is not None]
-			for step_command in step_commands:
-				if step_command.blocker:
-					while not step_command.blocker.happened:
-						yield valid_blockers
-						tasks.check(valid_blockers)
-				step_command.run(tmpdir)
-
-			# Check that the result is correct and store it in the cache
-			store.check_manifest_and_rename(required_digest, tmpdir)
-			tmpdir = None
-		finally:
-			# If unpacking fails, remove the temporary directory
-			if tmpdir is not None:
-				from zeroinstall import support
-				support.ro_rmtree(tmpdir)
+		return recipe.retrieve(self, required_digest, stores, force, impl_hint)
+		
 
 	def get_feed_mirror(self, url):
 		"""Return the URL of a mirror for this feed."""
