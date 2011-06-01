@@ -431,6 +431,24 @@ class DownloadSource(RetrievalMethod):
 					start_offset = self.start_offset or 0)
 		return StepCommand()
 
+	def retrieve(self, fetcher, force = False, impl_hint = None):
+		"""Retrieve an archive. You should normally call L{Implementation.retrieve}
+		instead, since it handles other kinds of retrieval method too."""
+		url = self.url
+		if not (url.startswith('http:') or url.startswith('https:') or url.startswith('ftp:')):
+			raise SafeException(_("Unknown scheme in download URL '%s'") % url)
+
+		mime_type = self.type
+		if not mime_type:
+			mime_type = unpack.type_from_url(self.url)
+		if not mime_type:
+			raise SafeException(_("No 'type' attribute on archive, and I can't guess from the name (%s)") % self.url)
+		unpack.check_type_ok(mime_type)
+		dl = fetcher.handler.get_download(self.url, force = force, hint = impl_hint)
+		dl.expected_size = self.size + (self.start_offset or 0)
+		return (dl.downloaded, dl.tempfile)
+
+
 
 class UnpackArchive(object):
 	"""An UnpackArchive step provides unpacks/extracts an archive.

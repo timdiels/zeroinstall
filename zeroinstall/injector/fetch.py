@@ -288,21 +288,7 @@ class Fetcher(object):
 	def download_archive(self, download_source, force = False, impl_hint = None):
 		"""Fetch an archive. You should normally call L{download_impl}
 		instead, since it handles other kinds of retrieval method too."""
-		from zeroinstall.zerostore import unpack
-
-		url = download_source.url
-		if not (url.startswith('http:') or url.startswith('https:') or url.startswith('ftp:')):
-			raise SafeException(_("Unknown scheme in download URL '%s'") % url)
-
-		mime_type = download_source.type
-		if not mime_type:
-			mime_type = unpack.type_from_url(download_source.url)
-		if not mime_type:
-			raise SafeException(_("No 'type' attribute on archive, and I can't guess from the name (%s)") % download_source.url)
-		unpack.check_type_ok(mime_type)
-		dl = self.handler.get_download(download_source.url, force = force, hint = impl_hint)
-		dl.expected_size = download_source.size + (download_source.start_offset or 0)
-		return (dl.downloaded, dl.tempfile)
+		return download_source.retrieve(self, force, impl_hint)
 
 	def download_icon(self, interface, force = False):
 		"""Download an icon for this interface and add it to the
