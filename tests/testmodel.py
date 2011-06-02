@@ -176,6 +176,7 @@ class TestModel(BaseTest):
 		assert a.download_sources[0].size == 1024
 		assert a.download_sources[0].extract == None
 		assert a.feed is f
+		assert len(tuple(a.archives)) == 2
 	
 	def testEnvBind(self):
 		a = model.EnvironmentBinding('PYTHONPATH', 'path')

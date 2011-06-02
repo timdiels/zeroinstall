@@ -283,7 +283,7 @@ class TestDownload(BaseTest):
                         assert alg
 
                         from zeroinstall.injector.model import ZeroInstallFeed
-			feed = ZeroInstallFeed(root, None, None, alg, self.config.fetcher, self.config.stores)
+			feed = ZeroInstallFeed(root, None, None, False, alg, self.config.fetcher, self.config.stores)
 
                         expected_id = 'sha1=3ce644dc725f1d21cfcf02562c76f375944b266a'
                         assert feed.implementations[expected_id]

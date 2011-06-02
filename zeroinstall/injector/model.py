@@ -411,6 +411,12 @@ class RetrievalMethod(object):
 		"""
 		raise NotImplementedError("abstract")
 
+	@property
+	def archives(self):
+		'''get all archives in this retrieval method'''
+		return ()
+			
+
 class DownloadSource(RetrievalMethod):
 	"""A DownloadSource provides a way to fetch an implementation."""
 	__slots__ = ['implementation', 'url', 'size', 'extract', 'start_offset', 'type']
@@ -423,18 +429,37 @@ class DownloadSource(RetrievalMethod):
 		self.start_offset = start_offset
 		self.type = type		# MIME type - see unpack.py
 
+	@property
+	def archives(self):
+		return self
+			
+
+	def _generate_size(self, fetcher):
+		dl = self._download(fetcher)
+		tasks.wait_for_blocker(dl.downloaded)
+		self.size = dl.get_bytes_downloaded_so_far()
+
 	@staticmethod
-	def fromDOM(elem, impl):
+	def fromDOM(elem, impl, generate_sizes=False, fetcher=None):
 		"""Make a DownloadSource from a DOM archive element."""
+
 		url = elem.getAttribute('href')
 		if not url:
 			raise InvalidInterface(_("Missing href attribute on <archive>"))
+
 		size = elem.getAttribute('size')
-		if not size:
+		if size:
+			size = int(size)
+		elif not generate_sizes:
 			raise InvalidInterface(_("Missing size attribute on <archive>"))
 
-		return DownloadSource(impl, url = url, size = int(size), extract = elem.getAttribute('extract'),
+		archive = DownloadSource(impl, url = url, size = size, extract = elem.getAttribute('extract'),
 			start_offset = _get_long(elem, 'start-offset'), type = elem.getAttribute('type'))
+
+		if not size and generate_sizes:
+			archive._generate_size(fetcher)
+
+		return archive
 
 	def prepare(self, fetcher, force, impl_hint):
 
@@ -455,6 +480,10 @@ class DownloadSource(RetrievalMethod):
 	def download(self, fetcher, force = False, impl_hint = None):
 		"""Fetch an archive. You should normally call L{Implementation.retrieve}
 		instead, since it handles other kinds of retrieval method too."""
+		dl = self._download(fetcher, force, impl_hint)
+		return (dl.downloaded, dl.tempfile)
+
+	def _download(self, fetcher, force = False, impl_hint = None):
 		url = self.url
 		if not (url.startswith('http:') or url.startswith('https:') or url.startswith('ftp:')):
 			raise SafeException(_("Unknown scheme in download URL '%s'") % url)
@@ -466,8 +495,9 @@ class DownloadSource(RetrievalMethod):
 			raise SafeException(_("No 'type' attribute on archive, and I can't guess from the name (%s)") % self.url)
 		unpack.check_type_ok(mime_type)
 		dl = fetcher.handler.get_download(self.url, force = force, hint = impl_hint)
-		dl.expected_size = self.size + (self.start_offset or 0)
-		return (dl.downloaded, dl.tempfile)
+		if self.size:
+			dl.expected_size = self.size + (self.start_offset or 0)
+		return dl
 
 	@tasks.async
 	def retrieve(self, fetcher, destination, force = False, impl_hint = None):
@@ -477,7 +507,7 @@ class DownloadSource(RetrievalMethod):
 		command.run(destination)
 
 
-class UnpackArchive(object):
+class UnpackArchive(RetrievalMethod):
 	"""An UnpackArchive step provides unpacks/extracts an archive.
 
 	It can be used inside a Recipe."""
@@ -523,6 +553,12 @@ class Recipe(RetrievalMethod):
 	
 	size = property(lambda self: sum([x.size for x in self.steps]))
 
+	@property
+	def archives(self):
+		'''get all archives in this retrieval method'''
+		from itertools import chain
+		return chain(*[step.archives for step in self.steps])
+			
 	@tasks.async
 	def retrieve(self, fetcher, destination, force = False, impl_hint = None):
 		# Start preparing all steps
@@ -538,12 +574,12 @@ class Recipe(RetrievalMethod):
 			step_command.run(destination)
 
 	@staticmethod
-	def fromDOM(elem):
+	def fromDOM(elem, generate_sizes=False, fetcher=None):
 		"""Make a Recipe from a DOM recipe element"""
 		recipe = Recipe()
 		for recipe_step in elem.childNodes:
 			if recipe_step.uri == XMLNS_IFACE and recipe_step.name == 'archive':
-				recipe.steps.append(DownloadSource.fromDOM(recipe_step, None))
+				recipe.steps.append(DownloadSource.fromDOM(recipe_step, None, generate_sizes, fetcher))
 			elif recipe_step.uri == XMLNS_IFACE and recipe_step.name == 'unpack':
 				path = recipe_step.getAttribute('path')
 				if not path:
@@ -741,6 +777,12 @@ class Implementation(object):
 		@rtype: L{tasks.Blocker}"""
 		raise NotImplementedError("abstract")
 
+	@property
+	def archives(self):
+		'''get all archives in this implementation'''
+		return ()
+			
+
 class DistributionImplementation(Implementation):
 	"""An implementation provided by the distribution. Information such as the version
 	comes from the package manager.
@@ -781,12 +823,22 @@ class ZeroInstallImplementation(Implementation):
 		self.digests = []
 		self.local_path = local_path
 
+	@property
+	def archives(self):
+		'''get all archives in this implementation'''
+		from itertools import chain
+		return chain([method.archives for method in self.download_sources])
+			
+
 	@staticmethod
-	def fromDOM(feed, item, item_attrs, local_dir, commands, bindings, depends, id_generation_alg=None, fetcher=None, stores=None):
+	def fromDOM(feed, item, item_attrs, local_dir, commands, bindings, depends, 
+			generate_sizes=False, id_generation_alg=None, fetcher=None, stores=None):
 		"""Make an implementation from a DOM implementation element.
+		@param generate_sizes: if True, sizes of archives with missing size attributes will be generated
+		@type generate_sizes: bool
 		@param id_generation_alg: if specified, id will be autogenerated, if id is None, with this alg
 		@type id_generation_alg: L{Algorithm}
-		@param fetcher: must be specified if id_generation_alg is specified
+		@param fetcher: must be specified if id_generation_alg/generate_sizes is specified/True
 		@param stores: must be specified if id_generation_alg is specified
 		"""
 		id = item.getAttribute('id')
@@ -841,13 +893,13 @@ class ZeroInstallImplementation(Implementation):
 		for elem in item.childNodes:
 			if elem.uri != XMLNS_IFACE: continue
 			if elem.name == 'archive':
-				impl.download_sources.append(DownloadSource.fromDOM(elem, impl))
+				impl.download_sources.append(DownloadSource.fromDOM(elem, impl, generate_sizes, fetcher))
 			elif elem.name == 'manifest-digest':
 				for aname, avalue in elem.attrs.iteritems():
 					if ' ' not in aname:
 						impl.digests.append('%s=%s' % (aname, avalue))
 			elif elem.name == 'recipe':
-				recipe = Recipe.fromDOM(elem)
+				recipe = Recipe.fromDOM(elem, generate_sizes, fetcher)
 				if recipe:
 					impl.download_sources.append(recipe)
 
@@ -1080,12 +1132,14 @@ class ZeroInstallFeed(object):
 	__slots__ = ['url', 'implementations', 'changed_implementations', 'name', 'descriptions', 'first_description', 'summaries', 'first_summary', '_package_implementations',
 		     'last_checked', 'last_modified', 'feeds', 'feed_for', 'metadata']
 
-	def __init__(self, feed_element, local_path = None, distro = None, 
+	def __init__(self, feed_element, local_path = None, distro = None, generate_sizes = False,
 			implementation_id_alg=None, fetcher=None, stores=None):
 		"""Create a feed object from a DOM.
 		@param feed_element: the root element of a feed file
 		@type feed_element: L{qdom.Element}
 		@param local_path: the pathname of this local feed, or None for remote feeds
+		@param generate_sizes: if True, sizes of archives with missing size attributes will be generated
+		@type generate_sizes: bool
 		@param implementation_id_alg: if specified, missing impl ids will be generated with this alg
 		@type implementation_id_alg: L{Algorithm}
 		@param fetcher: cannot be None if implementation_id_alg is specified
@@ -1222,7 +1276,7 @@ class ZeroInstallFeed(object):
 					process_group(item, item_attrs, depends, bindings, commands)
 				elif item.name == 'implementation':
 					impl = ZeroInstallImplementation.fromDOM(self, item, item_attrs, local_dir, commands, bindings, depends,
-							implementation_id_alg, fetcher, stores)
+							generate_sizes, implementation_id_alg, fetcher, stores)
 					if impl.id in self.implementations:
 						warn(_("Duplicate ID '%(id)s' in feed '%(feed)s'"), {'id': id, 'feed': self})
 					self.implementations[impl.id] = impl
@@ -1240,6 +1294,12 @@ class ZeroInstallFeed(object):
 			root_commands['run'] = Command(qdom.Element(XMLNS_IFACE, 'command', {'path': main}), None)
 		process_group(feed_element, root_attrs, [], [], root_commands)
 	
+	@property
+	def archives(self):
+		'''get all archives in this feed'''
+		from itertools import chain
+		return chain(*[impl.archives for impl in self.implementations.itervalues()])
+			
 	def get_distro_feed(self):
 		"""Does this feed contain any <pacakge-implementation> elements?
 		i.e. is it worth asking the package manager for more information?
