@@ -855,6 +855,7 @@ class ZeroInstallImplementation(Implementation):
 			assert fetcher
 			assert stores
 			impl.id = impl._generate_digest(fetcher, stores, id_generation_alg)
+			feed.changed_implementations.append(impl)
 		if impl.id is None:
 			raise InvalidInterface(_("Missing 'id' attribute on %s") % item)
 
@@ -1061,6 +1062,7 @@ class ZeroInstallFeed(object):
 	@ivar url: the URL for this feed
 	@ivar implementations: Implementations in this feed, indexed by ID
 	@type implementations: {str: L{Implementation}}
+	@ivar changed_implementations: Ordered list of implementations that had their ID changed (i.e. they had their id changed)
 	@ivar name: human-friendly name
 	@ivar summaries: short textual description (in various languages, since 0.49)
 	@type summaries: {str: str}
@@ -1075,7 +1077,7 @@ class ZeroInstallFeed(object):
 	@ivar metadata: extra elements we didn't understand
 	"""
 	# _main is deprecated
-	__slots__ = ['url', 'implementations', 'name', 'descriptions', 'first_description', 'summaries', 'first_summary', '_package_implementations',
+	__slots__ = ['url', 'implementations', 'changed_implementations', 'name', 'descriptions', 'first_description', 'summaries', 'first_summary', '_package_implementations',
 		     'last_checked', 'last_modified', 'feeds', 'feed_for', 'metadata']
 
 	def __init__(self, feed_element, local_path = None, distro = None, 
@@ -1089,6 +1091,7 @@ class ZeroInstallFeed(object):
 		@param fetcher: cannot be None if implementation_id_alg is specified
 		@param stores: cannot be None if implementation_id_alg is specified"""
 		self.implementations = {}
+		self.changed_implementations = []
 		self.name = None
 		self.summaries = {}	# { lang: str }
 		self.first_summary = None
@@ -1436,4 +1439,5 @@ def format_version(version):
 		version[x] = '-' + _version_value_to_mod[version[x]]
 	if version[-1] == '-': del version[-1]
 	return ''.join(version)
+
 
