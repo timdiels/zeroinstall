@@ -748,6 +748,108 @@ class ZeroInstallImplementation(Implementation):
 		self.digests = []
 		self.local_path = local_path
 
+	@staticmethod
+	def fromDOM(feed, item, item_attrs, local_dir, commands, bindings, depends):
+		"""Make an implementation from a DOM implementation element."""
+		id = item.getAttribute('id')
+		if id is None:
+			raise InvalidInterface(_("Missing 'id' attribute on %s") % item)
+		local_path = item_attrs.get('local-path')
+		if local_dir and local_path:
+			abs_local_path = os.path.abspath(os.path.join(local_dir, local_path))
+			impl = ZeroInstallImplementation(feed, id, abs_local_path)
+		elif local_dir and (id.startswith('/') or id.startswith('.')):
+			# For old feeds
+			id = os.path.abspath(os.path.join(local_dir, id))
+			impl = ZeroInstallImplementation(feed, id, id)
+		else:
+			impl = ZeroInstallImplementation(feed, id, None)
+			if '=' in id:
+				# In older feeds, the ID was the (single) digest
+				impl.digests.append(id)
+		if id in feed.implementations:
+			warn(_("Duplicate ID '%(id)s' in feed '%(feed)s'"), {'id': id, 'feed': feed})
+		feed.implementations[id] = impl
+
+		impl.metadata = item_attrs
+		try:
+			version_mod = item_attrs.get('version-modifier', None)
+			if version_mod:
+				item_attrs['version'] += version_mod
+				del item_attrs['version-modifier']
+			version = item_attrs['version']
+		except KeyError:
+			raise InvalidInterface(_("Missing version attribute"))
+		impl.version = parse_version(version)
+
+		impl.commands = commands
+
+		impl.released = item_attrs.get('released', None)
+		impl.langs = item_attrs.get('langs', '').replace('_', '-')
+
+		size = item.getAttribute('size')
+		if size:
+			impl.size = int(size)
+		impl.arch = item_attrs.get('arch', None)
+		try:
+			stability = stability_levels[str(item_attrs['stability'])]
+		except KeyError:
+			stab = str(item_attrs['stability'])
+			if stab != stab.lower():
+				raise InvalidInterface(_('Stability "%s" invalid - use lower case!') % item_attrs.stability)
+			raise InvalidInterface(_('Stability "%s" invalid') % item_attrs['stability'])
+		if stability >= preferred:
+			raise InvalidInterface(_("Upstream can't set stability to preferred!"))
+		impl.upstream_stability = stability
+
+		impl.bindings = bindings
+		impl.requires = depends
+
+		for elem in item.childNodes:
+			if elem.uri != XMLNS_IFACE: continue
+			if elem.name == 'archive':
+				url = elem.getAttribute('href')
+				if not url:
+					raise InvalidInterface(_("Missing href attribute on <archive>"))
+				size = elem.getAttribute('size')
+				if not size:
+					raise InvalidInterface(_("Missing size attribute on <archive>"))
+				impl.add_download_source(url = url, size = int(size),
+						extract = elem.getAttribute('extract'),
+						start_offset = _get_long(elem, 'start-offset'),
+						type = elem.getAttribute('type'))
+			elif elem.name == 'manifest-digest':
+				for aname, avalue in elem.attrs.iteritems():
+					if ' ' not in aname:
+						impl.digests.append('%s=%s' % (aname, avalue))
+			elif elem.name == 'recipe':
+				recipe = Recipe()
+				for recipe_step in elem.childNodes:
+					if recipe_step.uri == XMLNS_IFACE and recipe_step.name == 'archive':
+						url = recipe_step.getAttribute('href')
+						if not url:
+							raise InvalidInterface(_("Missing href attribute on <archive>"))
+						size = recipe_step.getAttribute('size')
+						if not size:
+							raise InvalidInterface(_("Missing size attribute on <archive>"))
+						recipe.steps.append(DownloadSource(None, url = url, size = int(size),
+								extract = recipe_step.getAttribute('extract'),
+								start_offset = _get_long(recipe_step, 'start-offset'),
+								type = recipe_step.getAttribute('type')))
+					elif recipe_step.uri == XMLNS_IFACE and recipe_step.name == 'unpack':
+						path = recipe_step.getAttribute('path')
+						if not path:
+							raise InvalidInterface(_("Missing path attribute on <unpack>"))
+						recipe.steps.append(UnpackArchive(path = path,
+							extract = recipe_step.getAttribute('extract'),
+							type = recipe_step.getAttribute('type')))
+					else:
+						info(_("Unknown step '%s' in recipe; skipping recipe"), recipe_step.name)
+						break
+				else:
+					impl.download_sources.append(recipe)
+
+
 	# Deprecated
 	dependencies = property(lambda self: dict([(x.interface, x) for x in self.requires
 						   if isinstance(x, InterfaceDependency)]))
@@ -1076,112 +1178,13 @@ class ZeroInstallFeed(object):
 				if item.name == 'group':
 					process_group(item, item_attrs, depends, bindings, commands)
 				elif item.name == 'implementation':
-					process_impl(item, item_attrs, depends, bindings, commands)
+					ZeroInstallImplementation.fromDOM(self, item, item_attrs, local_dir, commands, bindings, depends)
 				elif item.name == 'package-implementation':
 					if depends:
 						warn("A <package-implementation> with dependencies in %s!", self.url)
 					self._package_implementations.append((item, item_attrs))
 				else:
 					assert 0
-
-		def process_impl(item, item_attrs, depends, bindings, commands):
-			id = item.getAttribute('id')
-			if id is None:
-				raise InvalidInterface(_("Missing 'id' attribute on %s") % item)
-			local_path = item_attrs.get('local-path')
-			if local_dir and local_path:
-				abs_local_path = os.path.abspath(os.path.join(local_dir, local_path))
-				impl = ZeroInstallImplementation(self, id, abs_local_path)
-			elif local_dir and (id.startswith('/') or id.startswith('.')):
-				# For old feeds
-				id = os.path.abspath(os.path.join(local_dir, id))
-				impl = ZeroInstallImplementation(self, id, id)
-			else:
-				impl = ZeroInstallImplementation(self, id, None)
-				if '=' in id:
-					# In older feeds, the ID was the (single) digest
-					impl.digests.append(id)
-			if id in self.implementations:
-				warn(_("Duplicate ID '%(id)s' in feed '%(feed)s'"), {'id': id, 'feed': self})
-			self.implementations[id] = impl
-
-			impl.metadata = item_attrs
-			try:
-				version_mod = item_attrs.get('version-modifier', None)
-				if version_mod:
-					item_attrs['version'] += version_mod
-					del item_attrs['version-modifier']
-				version = item_attrs['version']
-			except KeyError:
-				raise InvalidInterface(_("Missing version attribute"))
-			impl.version = parse_version(version)
-
-			impl.commands = commands
-
-			impl.released = item_attrs.get('released', None)
-			impl.langs = item_attrs.get('langs', '').replace('_', '-')
-
-			size = item.getAttribute('size')
-			if size:
-				impl.size = int(size)
-			impl.arch = item_attrs.get('arch', None)
-			try:
-				stability = stability_levels[str(item_attrs['stability'])]
-			except KeyError:
-				stab = str(item_attrs['stability'])
-				if stab != stab.lower():
-					raise InvalidInterface(_('Stability "%s" invalid - use lower case!') % item_attrs.stability)
-				raise InvalidInterface(_('Stability "%s" invalid') % item_attrs['stability'])
-			if stability >= preferred:
-				raise InvalidInterface(_("Upstream can't set stability to preferred!"))
-			impl.upstream_stability = stability
-
-			impl.bindings = bindings
-			impl.requires = depends
-
-			for elem in item.childNodes:
-				if elem.uri != XMLNS_IFACE: continue
-				if elem.name == 'archive':
-					url = elem.getAttribute('href')
-					if not url:
-						raise InvalidInterface(_("Missing href attribute on <archive>"))
-					size = elem.getAttribute('size')
-					if not size:
-						raise InvalidInterface(_("Missing size attribute on <archive>"))
-					impl.add_download_source(url = url, size = int(size),
-							extract = elem.getAttribute('extract'),
-							start_offset = _get_long(elem, 'start-offset'),
-							type = elem.getAttribute('type'))
-				elif elem.name == 'manifest-digest':
-					for aname, avalue in elem.attrs.iteritems():
-						if ' ' not in aname:
-							impl.digests.append('%s=%s' % (aname, avalue))
-				elif elem.name == 'recipe':
-					recipe = Recipe()
-					for recipe_step in elem.childNodes:
-						if recipe_step.uri == XMLNS_IFACE and recipe_step.name == 'archive':
-							url = recipe_step.getAttribute('href')
-							if not url:
-								raise InvalidInterface(_("Missing href attribute on <archive>"))
-							size = recipe_step.getAttribute('size')
-							if not size:
-								raise InvalidInterface(_("Missing size attribute on <archive>"))
-							recipe.steps.append(DownloadSource(None, url = url, size = int(size),
-									extract = recipe_step.getAttribute('extract'),
-									start_offset = _get_long(recipe_step, 'start-offset'),
-									type = recipe_step.getAttribute('type')))
-						elif recipe_step.uri == XMLNS_IFACE and recipe_step.name == 'unpack':
-							path = recipe_step.getAttribute('path')
-							if not path:
-								raise InvalidInterface(_("Missing path attribute on <unpack>"))
-							recipe.steps.append(UnpackArchive(path = path,
-								extract = recipe_step.getAttribute('extract'),
-								type = recipe_step.getAttribute('type')))
-						else:
-							info(_("Unknown step '%s' in recipe; skipping recipe"), recipe_step.name)
-							break
-					else:
-						impl.download_sources.append(recipe)
 
 		root_attrs = {'stability': 'testing'}
 		root_commands = {}
