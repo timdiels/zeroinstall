@@ -193,7 +193,7 @@ def update(interface, source, local = False, iface_cache = None):
 
 	return feed
 
-def load_feed(source, local = False, selections_ok = False):
+def load_feed(source, local = False, selections_ok = False, implementation_id_alg=None):
 	"""Load a feed from a local file.
 	@param source: the name of the file to read
 	@type source: str
@@ -201,6 +201,8 @@ def load_feed(source, local = False, selections_ok = False):
 	@type local: bool
 	@param selections_ok: if it turns out to be a local selections document, return that instead
 	@type selections_ok: bool
+	@param implementation_id_alg: if specified, missing impl ids will be generated with this alg
+	@type implementation_id_alg: L{Algorithm}
 	@raise InvalidInterface: if the source's syntax is incorrect
 	@return: the new feed
 	@since: 0.48
@@ -221,6 +223,12 @@ def load_feed(source, local = False, selections_ok = False):
 		local_path = source
 	else:
 		local_path = None
-	feed = ZeroInstallFeed(root, local_path)
+	if implementation_id_alg:
+		from zeroinstall.injector.config import load_config
+		config = load_config()
+		feed = ZeroInstallFeed(root, local_path, None, implementation_id_alg, config.fetcher, config.stores)
+	else:
+		feed = ZeroInstallFeed(root, local_path)
 	feed.last_modified = int(os.stat(source).st_mtime)
+	
 	return feed
