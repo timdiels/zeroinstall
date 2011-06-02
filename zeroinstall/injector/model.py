@@ -423,6 +423,19 @@ class DownloadSource(RetrievalMethod):
 		self.start_offset = start_offset
 		self.type = type		# MIME type - see unpack.py
 
+	@staticmethod
+	def fromDOM(elem, impl):
+		"""Make a DownloadSource from a DOM archive element."""
+		url = elem.getAttribute('href')
+		if not url:
+			raise InvalidInterface(_("Missing href attribute on <archive>"))
+		size = elem.getAttribute('size')
+		if not size:
+			raise InvalidInterface(_("Missing size attribute on <archive>"))
+
+		return DownloadSource(impl, url = url, size = int(size), extract = elem.getAttribute('extract'),
+			start_offset = _get_long(elem, 'start-offset'), type = elem.getAttribute('type'))
+
 	def prepare(self, fetcher, force, impl_hint):
 
 		class StepCommand(object):
@@ -530,16 +543,7 @@ class Recipe(RetrievalMethod):
 		recipe = Recipe()
 		for recipe_step in elem.childNodes:
 			if recipe_step.uri == XMLNS_IFACE and recipe_step.name == 'archive':
-				url = recipe_step.getAttribute('href')
-				if not url:
-					raise InvalidInterface(_("Missing href attribute on <archive>"))
-				size = recipe_step.getAttribute('size')
-				if not size:
-					raise InvalidInterface(_("Missing size attribute on <archive>"))
-				recipe.steps.append(DownloadSource(None, url = url, size = int(size),
-						extract = recipe_step.getAttribute('extract'),
-						start_offset = _get_long(recipe_step, 'start-offset'),
-						type = recipe_step.getAttribute('type')))
+				recipe.steps.append(DownloadSource.fromDOM(recipe_step, None))
 			elif recipe_step.uri == XMLNS_IFACE and recipe_step.name == 'unpack':
 				path = recipe_step.getAttribute('path')
 				if not path:
@@ -837,16 +841,7 @@ class ZeroInstallImplementation(Implementation):
 		for elem in item.childNodes:
 			if elem.uri != XMLNS_IFACE: continue
 			if elem.name == 'archive':
-				url = elem.getAttribute('href')
-				if not url:
-					raise InvalidInterface(_("Missing href attribute on <archive>"))
-				size = elem.getAttribute('size')
-				if not size:
-					raise InvalidInterface(_("Missing size attribute on <archive>"))
-				impl.add_download_source(url = url, size = int(size),
-						extract = elem.getAttribute('extract'),
-						start_offset = _get_long(elem, 'start-offset'),
-						type = elem.getAttribute('type'))
+				impl.download_sources.append(DownloadSource.fromDOM(elem, impl))
 			elif elem.name == 'manifest-digest':
 				for aname, avalue in elem.attrs.iteritems():
 					if ' ' not in aname:
