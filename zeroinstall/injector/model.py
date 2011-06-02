@@ -524,6 +524,35 @@ class Recipe(RetrievalMethod):
 					tasks.check(valid_blockers)
 			step_command.run(destination)
 
+	@staticmethod
+	def fromDOM(elem):
+		"""Make a Recipe from a DOM recipe element"""
+		recipe = Recipe()
+		for recipe_step in elem.childNodes:
+			if recipe_step.uri == XMLNS_IFACE and recipe_step.name == 'archive':
+				url = recipe_step.getAttribute('href')
+				if not url:
+					raise InvalidInterface(_("Missing href attribute on <archive>"))
+				size = recipe_step.getAttribute('size')
+				if not size:
+					raise InvalidInterface(_("Missing size attribute on <archive>"))
+				recipe.steps.append(DownloadSource(None, url = url, size = int(size),
+						extract = recipe_step.getAttribute('extract'),
+						start_offset = _get_long(recipe_step, 'start-offset'),
+						type = recipe_step.getAttribute('type')))
+			elif recipe_step.uri == XMLNS_IFACE and recipe_step.name == 'unpack':
+				path = recipe_step.getAttribute('path')
+				if not path:
+					raise InvalidInterface(_("Missing path attribute on <unpack>"))
+				recipe.steps.append(UnpackArchive(path = path,
+					extract = recipe_step.getAttribute('extract'),
+					type = recipe_step.getAttribute('type')))
+			else:
+				info(_("Unknown step '%s' in recipe; skipping recipe"), recipe_step.name)
+				return None
+		else:
+			return recipe
+
 class DistributionSource(RetrievalMethod):
 	"""A package that is installed using the distribution's tools (including PackageKit).
 	@ivar install: a function to call to install this package
@@ -823,30 +852,8 @@ class ZeroInstallImplementation(Implementation):
 					if ' ' not in aname:
 						impl.digests.append('%s=%s' % (aname, avalue))
 			elif elem.name == 'recipe':
-				recipe = Recipe()
-				for recipe_step in elem.childNodes:
-					if recipe_step.uri == XMLNS_IFACE and recipe_step.name == 'archive':
-						url = recipe_step.getAttribute('href')
-						if not url:
-							raise InvalidInterface(_("Missing href attribute on <archive>"))
-						size = recipe_step.getAttribute('size')
-						if not size:
-							raise InvalidInterface(_("Missing size attribute on <archive>"))
-						recipe.steps.append(DownloadSource(None, url = url, size = int(size),
-								extract = recipe_step.getAttribute('extract'),
-								start_offset = _get_long(recipe_step, 'start-offset'),
-								type = recipe_step.getAttribute('type')))
-					elif recipe_step.uri == XMLNS_IFACE and recipe_step.name == 'unpack':
-						path = recipe_step.getAttribute('path')
-						if not path:
-							raise InvalidInterface(_("Missing path attribute on <unpack>"))
-						recipe.steps.append(UnpackArchive(path = path,
-							extract = recipe_step.getAttribute('extract'),
-							type = recipe_step.getAttribute('type')))
-					else:
-						info(_("Unknown step '%s' in recipe; skipping recipe"), recipe_step.name)
-						break
-				else:
+				recipe = Recipe.fromDOM(elem)
+				if recipe:
 					impl.download_sources.append(recipe)
 
 
