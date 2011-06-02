@@ -785,8 +785,6 @@ class ZeroInstallImplementation(Implementation):
 	def fromDOM(feed, item, item_attrs, local_dir, commands, bindings, depends):
 		"""Make an implementation from a DOM implementation element."""
 		id = item.getAttribute('id')
-		if id is None:
-			raise InvalidInterface(_("Missing 'id' attribute on %s") % item)
 		local_path = item_attrs.get('local-path')
 		if local_dir and local_path:
 			abs_local_path = os.path.abspath(os.path.join(local_dir, local_path))
@@ -800,11 +798,7 @@ class ZeroInstallImplementation(Implementation):
 			if '=' in id:
 				# In older feeds, the ID was the (single) digest
 				impl.digests.append(id)
-		if id in feed.implementations:
-			warn(_("Duplicate ID '%(id)s' in feed '%(feed)s'"), {'id': id, 'feed': feed})
-		feed.implementations[id] = impl
 
-		impl.metadata = item_attrs
 		try:
 			version_mod = item_attrs.get('version-modifier', None)
 			if version_mod:
@@ -815,15 +809,19 @@ class ZeroInstallImplementation(Implementation):
 			raise InvalidInterface(_("Missing version attribute"))
 		impl.version = parse_version(version)
 
+		impl.metadata = item_attrs
 		impl.commands = commands
-
+		impl.bindings = bindings
+		impl.requires = depends
 		impl.released = item_attrs.get('released', None)
 		impl.langs = item_attrs.get('langs', '').replace('_', '-')
 
 		size = item.getAttribute('size')
 		if size:
 			impl.size = int(size)
+
 		impl.arch = item_attrs.get('arch', None)
+
 		try:
 			stability = stability_levels[str(item_attrs['stability'])]
 		except KeyError:
@@ -834,9 +832,6 @@ class ZeroInstallImplementation(Implementation):
 		if stability >= preferred:
 			raise InvalidInterface(_("Upstream can't set stability to preferred!"))
 		impl.upstream_stability = stability
-
-		impl.bindings = bindings
-		impl.requires = depends
 
 		for elem in item.childNodes:
 			if elem.uri != XMLNS_IFACE: continue
@@ -850,6 +845,11 @@ class ZeroInstallImplementation(Implementation):
 				recipe = Recipe.fromDOM(elem)
 				if recipe:
 					impl.download_sources.append(recipe)
+
+		if id is None:
+			raise InvalidInterface(_("Missing 'id' attribute on %s") % item)
+
+		return impl
 
 
 	# Deprecated
@@ -1180,7 +1180,10 @@ class ZeroInstallFeed(object):
 				if item.name == 'group':
 					process_group(item, item_attrs, depends, bindings, commands)
 				elif item.name == 'implementation':
-					ZeroInstallImplementation.fromDOM(self, item, item_attrs, local_dir, commands, bindings, depends)
+					impl = ZeroInstallImplementation.fromDOM(self, item, item_attrs, local_dir, commands, bindings, depends)
+					if impl.id in self.implementations:
+						warn(_("Duplicate ID '%(id)s' in feed '%(feed)s'"), {'id': id, 'feed': self})
+					self.implementations[impl.id] = impl
 				elif item.name == 'package-implementation':
 					if depends:
 						warn("A <package-implementation> with dependencies in %s!", self.url)
