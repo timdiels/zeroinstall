@@ -794,7 +794,7 @@ class ZeroInstallImplementation(Implementation):
 		if local_dir and local_path:
 			abs_local_path = os.path.abspath(os.path.join(local_dir, local_path))
 			impl = ZeroInstallImplementation(feed, id, abs_local_path)
-		elif local_dir and (id.startswith('/') or id.startswith('.')):
+		elif local_dir and (id and (id.startswith('/') or id.startswith('.'))):
 			# For old feeds
 			id = os.path.abspath(os.path.join(local_dir, id))
 			impl = ZeroInstallImplementation(feed, id, id)
