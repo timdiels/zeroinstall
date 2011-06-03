@@ -275,15 +275,12 @@ class TestDownload(BaseTest):
 			sys.stdout = StringIO()
 			self.child = server.handle_requests(('HelloWorld.tgz'))
 
-                        from zeroinstall.injector import qdom
-                        root = qdom.parse(file(os.path.abspath('ImplementationNoId.xml')))
-
                         from zeroinstall.zerostore import manifest
                         alg = manifest.get_algorithm('sha1')
                         assert alg
 
-                        from zeroinstall.injector.model import ZeroInstallFeed
-			feed = ZeroInstallFeed(root, None, None, False, alg, self.config.fetcher, self.config.stores)
+                        from zeroinstall.injector.reader import load_feed
+			feed = load_feed(os.path.abspath('ImplementationNoId.xml'), True, False, False, alg, self.config)
 
                         expected_id = 'sha1=3ce644dc725f1d21cfcf02562c76f375944b266a'
                         assert feed.implementations[expected_id]

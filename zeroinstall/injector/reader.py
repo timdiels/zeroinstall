@@ -193,7 +193,7 @@ def update(interface, source, local = False, iface_cache = None):
 
 	return feed
 
-def load_feed(source, local = False, selections_ok = False, generate_sizes = False, implementation_id_alg=None):
+def load_feed(source, local = False, selections_ok = False, generate_sizes = False, implementation_id_alg=None, config=None):
 	"""Load a feed from a local file.
 	@param source: the name of the file to read
 	@type source: str
@@ -225,9 +225,10 @@ def load_feed(source, local = False, selections_ok = False, generate_sizes = Fal
 		local_path = source
 	else:
 		local_path = None
-	if implementation_id_alg:
+	if implementation_id_alg or generate_sizes:
 		from zeroinstall.injector.config import load_config
-		config = load_config()
+		if config is None:
+			config = load_config()
 		feed = ZeroInstallFeed(root, local_path, None, generate_sizes, implementation_id_alg, config.fetcher, config.stores)
 	else:
 		feed = ZeroInstallFeed(root, local_path)
