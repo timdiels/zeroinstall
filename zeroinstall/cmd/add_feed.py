@@ -11,7 +11,7 @@ from zeroinstall.cmd import UsageError
 from zeroinstall.injector import model, writer
 from zeroinstall.injector.policy import Policy
 
-syntax = "NEW-FEED"
+syntax = "[INTERFACE] NEW-FEED"
 
 def add_options(parser):
 	parser.add_option("-o", "--offline", help=_("try to avoid using the network"), action='store_true')
@@ -23,22 +23,38 @@ def find_feed_import(iface, feed_url):
 	return None
 
 def handle(config, options, args, add_ok = True, remove_ok = False):
-	if len(args) != 1: raise UsageError()
+	if options.offline:
+		config.network_use = model.network_offline
+
+	if len(args) == 2:
+		iface = config.iface_cache.get_interface(model.canonical_iface_uri(args[0]))
+		feed_url = args[1]
+
+		if find_feed_import(iface, feed_url):
+			raise SafeException(_('Interface %(interface)s already has feed %(feed)s') %
+						{'interface': iface.uri, 'feed': feed_url})
+
+		feed = config.iface_cache.get_feed(feed_url)
+		if not feed:
+			blocker = config.fetcher.download_and_import_feed(feed_url, config.iface_cache)
+			tasks.wait_for_blocker(blocker)
+
+		iface.extra_feeds.append(model.Feed(feed_url, arch = None, user_override = True))
+		writer.save_interface(iface)
+		return
+	elif len(args) != 1:
+		raise UsageError()
 
 	x = args[0]
 
 	print _("Feed '%s':") % x + '\n'
 	x = model.canonical_iface_uri(x)
 	policy = Policy(x, config = config)
-	if options.offline:
-		config.network_use = model.network_offline
 
 	feed = config.iface_cache.get_feed(x)
 	if policy.network_use != model.network_offline and policy.is_stale(feed):
-		blocker = policy.fetcher.download_and_import_feed(x, config.iface_cache)
-		print _("Downloading feed; please wait...")
+		blocker = config.fetcher.download_and_import_feed(x, config.iface_cache)
 		tasks.wait_for_blocker(blocker)
-		print _("Done")
 
 	candidate_interfaces = policy.get_feed_targets(x)
 	assert candidate_interfaces
