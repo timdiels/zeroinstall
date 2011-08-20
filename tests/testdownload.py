@@ -269,6 +269,39 @@ class TestDownload(BaseTest):
 				if "Downloaded archive has incorrect size" not in str(ex):
 					raise ex
 
+	def testImplementationGenerateMissingId(self):
+                old_out = sys.stdout
+		try:
+			sys.stdout = StringIO()
+			self.child = server.handle_requests(('HelloWorld.tgz'))
+
+                        from zeroinstall.zerostore import manifest
+                        alg = manifest.get_algorithm('sha1')
+                        assert alg
+
+                        from zeroinstall.injector.reader import load_feed
+			feed = load_feed(os.path.abspath('ImplementationNoId.xml'), True, False, False, alg, self.config)
+
+                        expected_id = 'sha1=3ce644dc725f1d21cfcf02562c76f375944b266a'
+                        assert feed.implementations[expected_id]
+                        assert feed.implementations[expected_id].id == expected_id
+		finally:
+			sys.stdout = old_out
+
+	def testArchiveGenerateMissingSize(self):
+                old_out = sys.stdout
+		try:
+			sys.stdout = StringIO()
+			self.child = server.handle_requests(('HelloWorld.tgz'))
+
+                        from zeroinstall.injector.reader import load_feed
+			feed = load_feed(os.path.abspath('MissingSize.xml'), True, False, True, None, self.config)
+
+                        expected_id = 'sha1=3ce644dc725f1d21cfcf02562c76f375944b266a'
+                        assert feed.implementations[expected_id].download_sources[0].size == 176
+		finally:
+			sys.stdout = old_out
+
 	def testRecipe(self):
 		old_out = sys.stdout
 		try:

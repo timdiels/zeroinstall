@@ -11,7 +11,7 @@ from logging import info, debug, warn
 
 from zeroinstall.support import tasks, basedir
 from zeroinstall.injector.namespaces import XMLNS_IFACE, config_site
-from zeroinstall.injector.model import DownloadSource, Recipe, SafeException, escape, DistributionSource
+from zeroinstall.injector.model import SafeException, escape, DistributionSource
 from zeroinstall.injector.iface_cache import PendingFeed, ReplayAttack
 from zeroinstall.injector.handler import NoTrustedKeys
 from zeroinstall.injector import download
@@ -96,38 +96,15 @@ class Fetcher(object):
 	def handler(self):
 		return self.config.handler
 
-	@tasks.async
 	def cook(self, required_digest, recipe, stores, force = False, impl_hint = None):
 		"""Follow a Recipe.
+		@deprecated: use impl.retrieve() instead
 		@param impl_hint: the Implementation this is for (if any) as a hint for the GUI
 		@see: L{download_impl} uses this method when appropriate"""
 		# Maybe we're taking this metaphor too far?
-
-		# Start preparing all steps
-		step_commands = [step.prepare(self, force, impl_hint) for step in recipe.steps]
-
-		# Create an empty directory for the new implementation
-		store = stores.stores[0]
-		tmpdir = store.get_tmp_dir_for(required_digest)
-
-		try:
-			# Run steps
-			valid_blockers = [s.blocker for s in step_commands if s.blocker is not None]
-			for step_command in step_commands:
-				if step_command.blocker:
-					while not step_command.blocker.happened:
-						yield valid_blockers
-						tasks.check(valid_blockers)
-				step_command.run(tmpdir)
-
-			# Check that the result is correct and store it in the cache
-			store.check_manifest_and_rename(required_digest, tmpdir)
-			tmpdir = None
-		finally:
-			# If unpacking fails, remove the temporary directory
-			if tmpdir is not None:
-				from zeroinstall import support
-				support.ro_rmtree(tmpdir)
+		# Note: unused
+		return impl_hint.retrieve(self, recipe, stores, force)
+		
 
 	def get_feed_mirror(self, url):
 		"""Return the URL of a mirror for this feed."""
@@ -297,6 +274,7 @@ class Fetcher(object):
 
 	def download_impl(self, impl, retrieval_method, stores, force = False):
 		"""Download an implementation.
+		@deprecated: use impl.retrieve(...) instead
 		@param impl: the selected implementation
 		@type impl: L{model.ZeroInstallImplementation}
 		@param retrieval_method: a way of getting the implementation (e.g. an Archive or a Recipe)
@@ -307,68 +285,14 @@ class Fetcher(object):
 		@rtype: L{tasks.Blocker}"""
 		assert impl
 		assert retrieval_method
-
-		if isinstance(retrieval_method, DistributionSource):
-			return retrieval_method.install(self.handler)
-
-		from zeroinstall.zerostore import manifest
-		best = None
-		for digest in impl.digests:
-			alg_name = digest.split('=', 1)[0]
-			alg = manifest.algorithms.get(alg_name, None)
-			if alg and (best is None or best.rating < alg.rating):
-				best = alg
-				required_digest = digest
-
-		if best is None:
-			if not impl.digests:
-				raise SafeException(_("No <manifest-digest> given for '%(implementation)s' version %(version)s") %
-						{'implementation': impl.feed.get_name(), 'version': impl.get_version()})
-			raise SafeException(_("Unknown digest algorithms '%(algorithms)s' for '%(implementation)s' version %(version)s") %
-					{'algorithms': impl.digests, 'implementation': impl.feed.get_name(), 'version': impl.get_version()})
-
-		@tasks.async
-		def download_impl():
-			if isinstance(retrieval_method, DownloadSource):
-				blocker, stream = self.download_archive(retrieval_method, force = force, impl_hint = impl)
-				yield blocker
-				tasks.check(blocker)
-
-				stream.seek(0)
-				self._add_to_cache(required_digest, stores, retrieval_method, stream)
-			elif isinstance(retrieval_method, Recipe):
-				blocker = self.cook(required_digest, retrieval_method, stores, force, impl_hint = impl)
-				yield blocker
-				tasks.check(blocker)
-			else:
-				raise Exception(_("Unknown download type for '%s'") % retrieval_method)
-
-			self.handler.impl_added_to_store(impl)
-		return download_impl()
-
-	def _add_to_cache(self, required_digest, stores, retrieval_method, stream):
-		assert isinstance(retrieval_method, DownloadSource)
-		stores.add_archive_to_cache(required_digest, stream, retrieval_method.url, retrieval_method.extract,
-						 type = retrieval_method.type, start_offset = retrieval_method.start_offset or 0)
+		return impl.retrieve(self, retrieval_method, stores, force)
 
 	def download_archive(self, download_source, force = False, impl_hint = None):
 		"""Fetch an archive. You should normally call L{download_impl}
-		instead, since it handles other kinds of retrieval method too."""
-		from zeroinstall.zerostore import unpack
-
-		url = download_source.url
-		if not (url.startswith('http:') or url.startswith('https:') or url.startswith('ftp:')):
-			raise SafeException(_("Unknown scheme in download URL '%s'") % url)
-
-		mime_type = download_source.type
-		if not mime_type:
-			mime_type = unpack.type_from_url(download_source.url)
-		if not mime_type:
-			raise SafeException(_("No 'type' attribute on archive, and I can't guess from the name (%s)") % download_source.url)
-		unpack.check_type_ok(mime_type)
-		dl = self.handler.get_download(download_source.url, force = force, hint = impl_hint)
-		dl.expected_size = download_source.size + (download_source.start_offset or 0)
-		return (dl.downloaded, dl.tempfile)
+		instead, since it handles other kinds of retrieval method too.
+		@deprecated: use download_source.download instead"""
+		# Note: unused
+		return download_source.download(self, force, impl_hint)
 
 	def download_icon(self, interface, force = False):
 		"""Download an icon for this interface and add it to the
@@ -484,8 +408,8 @@ class Fetcher(object):
 
 	def get_best_source(self, impl):
 		"""Return the best download source for this implementation.
-		@rtype: L{model.RetrievalMethod}"""
-		if impl.download_sources:
-			return impl.download_sources[0]
-		return None
+		@rtype: L{model.RetrievalMethod}
+		@deprecated: use impl.best_download_source instead
+		"""
+		return impl.best_download_source
 

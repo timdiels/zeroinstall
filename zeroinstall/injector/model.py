@@ -20,6 +20,7 @@ from zeroinstall import SafeException, version
 from zeroinstall.injector.namespaces import XMLNS_IFACE
 from zeroinstall.injector import qdom
 from zeroinstall.zerostore import unpack
+from zeroinstall.support import tasks
 
 # Element names for bindings in feed files
 binding_names = frozenset(['environment', 'overlay'])
@@ -411,6 +412,20 @@ class RetrievalMethod(object):
 	"""A RetrievalMethod provides a way to fetch an implementation."""
 	__slots__ = []
 
+	@tasks.async
+	def retrieve(self, fetcher, destination, force = False, impl_hint = None):
+		"""Retrieve implementation using method
+		@param destination: where to put the retrieved files
+		@param impl_hint: the Implementation this is for (if any) as a hint for the GUI
+		"""
+		raise NotImplementedError("abstract")
+
+	@property
+	def archives(self):
+		'''get all archives in this retrieval method'''
+		return ()
+			
+
 class DownloadSource(RetrievalMethod):
 	"""A DownloadSource provides a way to fetch an implementation."""
 	__slots__ = ['implementation', 'url', 'size', 'extract', 'start_offset', 'type']
@@ -423,24 +438,85 @@ class DownloadSource(RetrievalMethod):
 		self.start_offset = start_offset
 		self.type = type		# MIME type - see unpack.py
 
+	@property
+	def archives(self):
+		return self
+			
+
+	def _generate_size(self, fetcher):
+		dl = self._download(fetcher)
+		tasks.wait_for_blocker(dl.downloaded)
+		self.size = dl.get_bytes_downloaded_so_far()
+
+	@staticmethod
+	def fromDOM(elem, impl, generate_sizes=False, fetcher=None):
+		"""Make a DownloadSource from a DOM archive element."""
+
+		url = elem.getAttribute('href')
+		if not url:
+			raise InvalidInterface(_("Missing href attribute on <archive>"))
+
+		size = elem.getAttribute('size')
+		if size:
+			size = int(size)
+		elif not generate_sizes:
+			raise InvalidInterface(_("Missing size attribute on <archive>"))
+
+		archive = DownloadSource(impl, url = url, size = size, extract = elem.getAttribute('extract'),
+			start_offset = _get_long(elem, 'start-offset'), type = elem.getAttribute('type'))
+
+		if not size and generate_sizes:
+			archive._generate_size(fetcher)
+
+		return archive
+
 	def prepare(self, fetcher, force, impl_hint):
 
 		class StepCommand(object):
 			__slots__ = ['blocker', '_stream']
 
 			def __init__(s):
-				s.blocker, s._stream = fetcher.download_archive(self, force = force, impl_hint = impl_hint)
+				s.blocker, s._stream = self.download(fetcher, force = force, impl_hint = impl_hint)
 
-			def run(s, tmpdir):
+			def run(s, destination):
 				s._stream.seek(0)
-				unpack.unpack_archive_over(self.url, s._stream, tmpdir,
+				unpack.unpack_archive_over(self.url, s._stream, destination,
 					extract = self.extract,
 					type = self.type,
 					start_offset = self.start_offset or 0)
 		return StepCommand()
 
+	def download(self, fetcher, force = False, impl_hint = None):
+		"""Fetch an archive. You should normally call L{Implementation.retrieve}
+		instead, since it handles other kinds of retrieval method too."""
+		dl = self._download(fetcher, force, impl_hint)
+		return (dl.downloaded, dl.tempfile)
 
-class UnpackArchive(object):
+	def _download(self, fetcher, force = False, impl_hint = None):
+		url = self.url
+		if not (url.startswith('http:') or url.startswith('https:') or url.startswith('ftp:')):
+			raise SafeException(_("Unknown scheme in download URL '%s'") % url)
+
+		mime_type = self.type
+		if not mime_type:
+			mime_type = unpack.type_from_url(self.url)
+		if not mime_type:
+			raise SafeException(_("No 'type' attribute on archive, and I can't guess from the name (%s)") % self.url)
+		unpack.check_type_ok(mime_type)
+		dl = fetcher.handler.get_download(self.url, force = force, hint = impl_hint)
+		if self.size:
+			dl.expected_size = self.size + (self.start_offset or 0)
+		return dl
+
+	@tasks.async
+	def retrieve(self, fetcher, destination, force = False, impl_hint = None):
+		command = self.prepare(fetcher, force, impl_hint)
+		yield command.blocker
+		tasks.check(command.blocker)
+		command.run(destination)
+
+
+class UnpackArchive(RetrievalMethod):
 	"""An UnpackArchive step provides unpacks/extracts an archive.
 
 	It can be used inside a Recipe."""
@@ -485,6 +561,46 @@ class Recipe(RetrievalMethod):
 		self.steps = []
 	
 	size = property(lambda self: sum([x.size for x in self.steps]))
+
+	@property
+	def archives(self):
+		'''get all archives in this retrieval method'''
+		from itertools import chain
+		return chain(*[step.archives for step in self.steps])
+			
+	@tasks.async
+	def retrieve(self, fetcher, destination, force = False, impl_hint = None):
+		# Start preparing all steps
+		step_commands = [step.prepare(fetcher, force, impl_hint) for step in self.steps]
+
+		# Run steps
+		valid_blockers = [s.blocker for s in step_commands if s.blocker is not None]
+		for step_command in step_commands:
+			if step_command.blocker:
+				while not step_command.blocker.happened:
+					yield valid_blockers
+					tasks.check(valid_blockers)
+			step_command.run(destination)
+
+	@staticmethod
+	def fromDOM(elem, generate_sizes=False, fetcher=None):
+		"""Make a Recipe from a DOM recipe element"""
+		recipe = Recipe()
+		for recipe_step in elem.childNodes:
+			if recipe_step.uri == XMLNS_IFACE and recipe_step.name == 'archive':
+				recipe.steps.append(DownloadSource.fromDOM(recipe_step, None, generate_sizes, fetcher))
+			elif recipe_step.uri == XMLNS_IFACE and recipe_step.name == 'unpack':
+				path = recipe_step.getAttribute('path')
+				if not path:
+					raise InvalidInterface(_("Missing path attribute on <unpack>"))
+				recipe.steps.append(UnpackArchive(path = path,
+					extract = recipe_step.getAttribute('extract'),
+					type = recipe_step.getAttribute('type')))
+			else:
+				info(_("Unknown step '%s' in recipe; skipping recipe"), recipe_step.name)
+				return None
+		else:
+			return recipe
 
 class DistributionSource(RetrievalMethod):
 	"""A package that is installed using the distribution's tools (including PackageKit).
@@ -583,7 +699,6 @@ class Implementation(object):
 		     'id', 'feed', 'version', 'released', 'bindings', 'machine']
 
 	def __init__(self, feed, id):
-		assert id
 		self.feed = feed
 		self.id = id
 		self.user_stability = None
@@ -653,6 +768,30 @@ class Implementation(object):
 		"""
 		raise NotImplementedError("abstract")
 
+	@property
+	def best_download_source(self):
+		"""Return the best download source for this implementation.
+		@rtype: L{model.RetrievalMethod}"""
+		if self.download_sources:
+			return self.download_sources[0]
+		return None
+
+	def retrieve(self, fetcher, retrieval_method, stores, force = False):
+		"""Retrieve an implementation.
+		@param retrieval_method: a way of getting the implementation (e.g. an Archive or a Recipe)
+		@type retrieval_method: L{model.RetrievalMethod}
+		@param stores: where to store the downloaded implementation
+		@type stores: L{zerostore.Stores}
+		@param force: whether to abort and restart an existing download
+		@rtype: L{tasks.Blocker}"""
+		raise NotImplementedError("abstract")
+
+	@property
+	def archives(self):
+		'''get all archives in this implementation'''
+		return ()
+			
+
 class DistributionImplementation(Implementation):
 	"""An implementation provided by the distribution. Information such as the version
 	comes from the package manager.
@@ -672,6 +811,10 @@ class DistributionImplementation(Implementation):
 	def is_available(self, stores):
 		return self.installed
 
+	def retrieve(self, fetcher, retrieval_method, stores, force = False):
+		return retrieval_method.install(fetcher.handler)
+
+
 class ZeroInstallImplementation(Implementation):
 	"""An implementation where all the information comes from Zero Install.
 	@ivar digests: a list of "algorith=value" strings (since 0.45)
@@ -681,12 +824,104 @@ class ZeroInstallImplementation(Implementation):
 
 	def __init__(self, feed, id, local_path):
 		"""id can be a local path (string starting with /) or a manifest hash (eg "sha1=XXX")"""
-		assert not id.startswith('package:'), id
+		if id:
+			assert not id.startswith('package:'), id
 		Implementation.__init__(self, feed, id)
 		self.size = None
 		self.os = None
 		self.digests = []
 		self.local_path = local_path
+
+	@property
+	def archives(self):
+		'''get all archives in this implementation'''
+		from itertools import chain
+		return chain([method.archives for method in self.download_sources])
+			
+
+	@staticmethod
+	def fromDOM(feed, item, item_attrs, local_dir, commands, bindings, depends, 
+			generate_sizes=False, id_generation_alg=None, fetcher=None, stores=None):
+		"""Make an implementation from a DOM implementation element.
+		@param generate_sizes: if True, sizes of archives with missing size attributes will be generated
+		@type generate_sizes: bool
+		@param id_generation_alg: if specified, id will be autogenerated, if id is None, with this alg
+		@type id_generation_alg: L{Algorithm}
+		@param fetcher: must be specified if id_generation_alg/generate_sizes is specified/True
+		@param stores: must be specified if id_generation_alg is specified
+		"""
+		id = item.getAttribute('id')
+		local_path = item_attrs.get('local-path')
+		if local_dir and local_path:
+			abs_local_path = os.path.abspath(os.path.join(local_dir, local_path))
+			impl = ZeroInstallImplementation(feed, id, abs_local_path)
+		elif local_dir and (id and (id.startswith('/') or id.startswith('.'))):
+			# For old feeds
+			id = os.path.abspath(os.path.join(local_dir, id))
+			impl = ZeroInstallImplementation(feed, id, id)
+		else:
+			impl = ZeroInstallImplementation(feed, id, None)
+			if id and '=' in id:
+				# In older feeds, the ID was the (single) digest
+				impl.digests.append(id)
+
+		try:
+			version_mod = item_attrs.get('version-modifier', None)
+			if version_mod:
+				item_attrs['version'] += version_mod
+				del item_attrs['version-modifier']
+			version = item_attrs['version']
+		except KeyError:
+			raise InvalidInterface(_("Missing version attribute"))
+		impl.version = parse_version(version)
+
+		impl.metadata = item_attrs
+		impl.commands = commands
+		impl.bindings = bindings
+		impl.requires = depends
+		impl.released = item_attrs.get('released', None)
+		impl.langs = item_attrs.get('langs', '').replace('_', '-')
+
+		size = item.getAttribute('size')
+		if size:
+			impl.size = int(size)
+
+		impl.arch = item_attrs.get('arch', None)
+
+		try:
+			stability = stability_levels[str(item_attrs['stability'])]
+		except KeyError:
+			stab = str(item_attrs['stability'])
+			if stab != stab.lower():
+				raise InvalidInterface(_('Stability "%s" invalid - use lower case!') % item_attrs.stability)
+			raise InvalidInterface(_('Stability "%s" invalid') % item_attrs['stability'])
+		if stability >= preferred:
+			raise InvalidInterface(_("Upstream can't set stability to preferred!"))
+		impl.upstream_stability = stability
+
+		for elem in item.childNodes:
+			if elem.uri != XMLNS_IFACE: continue
+			if elem.name == 'archive':
+				impl.download_sources.append(DownloadSource.fromDOM(elem, impl, generate_sizes, fetcher))
+			elif elem.name == 'manifest-digest':
+				for aname, avalue in elem.attrs.iteritems():
+					if ' ' not in aname:
+						impl.digests.append('%s=%s' % (aname, avalue))
+			elif elem.name == 'recipe':
+				recipe = Recipe.fromDOM(elem, generate_sizes, fetcher)
+				if recipe:
+					impl.download_sources.append(recipe)
+
+		if id is None and id_generation_alg:
+			assert fetcher
+			assert stores
+			impl.id = impl._generate_digest(fetcher, stores, id_generation_alg)
+			feed.changed_implementations.append(impl)
+		if impl.id is None:
+			raise InvalidInterface(_("Missing 'id' attribute on %s") % item)
+
+		return impl
+
 
 	# Deprecated
 	dependencies = property(lambda self: dict([(x.interface, x) for x in self.requires
@@ -694,6 +929,7 @@ class ZeroInstallImplementation(Implementation):
 
 	def add_download_source(self, url, size, extract, start_offset = 0, type = None):
 		"""Add a download source."""
+		# TODO should deprecate?
 		self.download_sources.append(DownloadSource(self, url, size, extract, start_offset, type))
 
 	def set_arch(self, arch):
@@ -707,6 +943,84 @@ class ZeroInstallImplementation(Implementation):
 			path = stores.lookup_maybe(self.digests)
 			return path is not None
 		return False	# (0compile creates fake entries with no digests)
+
+	@property
+	def best_digest(self):
+		"""Return the best digest for this implementation
+		@return: tuple (alg, digest) or None"""
+		from zeroinstall.zerostore import manifest
+		best_alg = None
+		for digest in self.digests:
+			alg_name = digest.split('=', 1)[0]
+			alg = manifest.algorithms.get(alg_name, None)
+			if alg and (best_alg is None or best_alg.rating < alg.rating):
+				best_alg = alg
+				best_digest = digest
+		if best_alg:
+			return (best_alg, best_digest)
+		else:
+			return None
+
+	def _generate_digest(self, fetcher, stores, alg):
+		digest = None
+
+		# Create an empty directory for the new implementation
+		store = stores.stores[0]
+		tmpdir = store.get_tmp_dir_for('missing')
+
+		try:
+			blocker = self.best_download_source.retrieve(fetcher, tmpdir, force=False, impl_hint = self)
+			tasks.wait_for_blocker(blocker)
+
+			from zeroinstall.zerostore import manifest
+			manifest.fixup_permissions(tmpdir)
+			digest = alg.getID(manifest.add_manifest_file(tmpdir, alg))
+		finally:
+			# If unpacking fails, remove the temporary directory
+			if tmpdir is not None:
+				from zeroinstall import support
+				support.ro_rmtree(tmpdir)
+
+		return digest
+
+
+	def retrieve(self, fetcher, retrieval_method, stores, force = False):
+		best = self.best_digest
+
+		if best is None:
+			if not self.digests:
+				raise SafeException(_("No <manifest-digest> given for '%(implementation)s' version %(version)s") %
+						{'implementation': self.feed.get_name(), 'version': self.get_version()})
+			raise SafeException(_("Unknown digest algorithms '%(algorithms)s' for '%(implementation)s' version %(version)s") %
+					{'algorithms': self.digests, 'implementation': self.feed.get_name(), 'version': self.get_version()})
+		else:
+			alg, required_digest = best
+
+		@tasks.async
+		def retrieve():
+			# Create an empty directory for the new implementation
+			store = stores.stores[0]
+			tmpdir = store.get_tmp_dir_for(required_digest)
+
+			try:
+				blocker = retrieval_method.retrieve(fetcher, tmpdir, force, impl_hint = self)
+				yield blocker
+				tasks.check(blocker)
+
+				# Check that the result is correct and store it in the cache
+				store.check_manifest_and_rename(required_digest, tmpdir)
+
+				tmpdir = None
+			finally:
+				# If unpacking fails, remove the temporary directory
+				if tmpdir is not None:
+					from zeroinstall import support
+					support.ro_rmtree(tmpdir)
+
+			fetcher.handler.impl_added_to_store(self)
+
+		return retrieve()
+
 
 class Interface(object):
 	"""An Interface represents some contract of behaviour.
@@ -809,6 +1123,7 @@ class ZeroInstallFeed(object):
 	@ivar url: the URL for this feed
 	@ivar implementations: Implementations in this feed, indexed by ID
 	@type implementations: {str: L{Implementation}}
+	@ivar changed_implementations: Ordered list of implementations that had their ID changed (i.e. they had their id changed)
 	@ivar name: human-friendly name
 	@ivar summaries: short textual description (in various languages, since 0.49)
 	@type summaries: {str: str}
@@ -823,15 +1138,23 @@ class ZeroInstallFeed(object):
 	@ivar metadata: extra elements we didn't understand
 	"""
 	# _main is deprecated
-	__slots__ = ['url', 'implementations', 'name', 'descriptions', 'first_description', 'summaries', 'first_summary', '_package_implementations',
+	__slots__ = ['url', 'implementations', 'changed_implementations', 'name', 'descriptions', 'first_description', 'summaries', 'first_summary', '_package_implementations',
 		     'last_checked', 'last_modified', 'feeds', 'feed_for', 'metadata']
 
-	def __init__(self, feed_element, local_path = None, distro = None):
+	def __init__(self, feed_element, local_path = None, distro = None, generate_sizes = False,
+			implementation_id_alg=None, fetcher=None, stores=None):
 		"""Create a feed object from a DOM.
 		@param feed_element: the root element of a feed file
 		@type feed_element: L{qdom.Element}
-		@param local_path: the pathname of this local feed, or None for remote feeds"""
+		@param local_path: the pathname of this local feed, or None for remote feeds
+		@param generate_sizes: if True, sizes of archives with missing size attributes will be generated
+		@type generate_sizes: bool
+		@param implementation_id_alg: if specified, missing impl ids will be generated with this alg
+		@type implementation_id_alg: L{Algorithm}
+		@param fetcher: cannot be None if implementation_id_alg is specified
+		@param stores: cannot be None if implementation_id_alg is specified"""
 		self.implementations = {}
+		self.changed_implementations = []
 		self.name = None
 		self.summaries = {}	# { lang: str }
 		self.first_summary = None
@@ -961,112 +1284,17 @@ class ZeroInstallFeed(object):
 				if item.name == 'group':
 					process_group(item, item_attrs, depends, bindings, commands)
 				elif item.name == 'implementation':
-					process_impl(item, item_attrs, depends, bindings, commands)
+					impl = ZeroInstallImplementation.fromDOM(self, item, item_attrs, local_dir, commands, bindings, depends,
+							generate_sizes, implementation_id_alg, fetcher, stores)
+					if impl.id in self.implementations:
+						warn(_("Duplicate ID '%(id)s' in feed '%(feed)s'"), {'id': id, 'feed': self})
+					self.implementations[impl.id] = impl
 				elif item.name == 'package-implementation':
 					if depends:
 						warn("A <package-implementation> with dependencies in %s!", self.url)
 					self._package_implementations.append((item, item_attrs))
 				else:
 					assert 0
-
-		def process_impl(item, item_attrs, depends, bindings, commands):
-			id = item.getAttribute('id')
-			if id is None:
-				raise InvalidInterface(_("Missing 'id' attribute on %s") % item)
-			local_path = item_attrs.get('local-path')
-			if local_dir and local_path:
-				abs_local_path = os.path.abspath(os.path.join(local_dir, local_path))
-				impl = ZeroInstallImplementation(self, id, abs_local_path)
-			elif local_dir and (id.startswith('/') or id.startswith('.')):
-				# For old feeds
-				id = os.path.abspath(os.path.join(local_dir, id))
-				impl = ZeroInstallImplementation(self, id, id)
-			else:
-				impl = ZeroInstallImplementation(self, id, None)
-				if '=' in id:
-					# In older feeds, the ID was the (single) digest
-					impl.digests.append(id)
-			if id in self.implementations:
-				warn(_("Duplicate ID '%(id)s' in feed '%(feed)s'"), {'id': id, 'feed': self})
-			self.implementations[id] = impl
-
-			impl.metadata = item_attrs
-			try:
-				version_mod = item_attrs.get('version-modifier', None)
-				if version_mod:
-					item_attrs['version'] += version_mod
-					del item_attrs['version-modifier']
-				version = item_attrs['version']
-			except KeyError:
-				raise InvalidInterface(_("Missing version attribute"))
-			impl.version = parse_version(version)
-
-			impl.commands = commands
-
-			impl.released = item_attrs.get('released', None)
-			impl.langs = item_attrs.get('langs', '').replace('_', '-')
-
-			size = item.getAttribute('size')
-			if size:
-				impl.size = int(size)
-			impl.arch = item_attrs.get('arch', None)
-			try:
-				stability = stability_levels[str(item_attrs['stability'])]
-			except KeyError:
-				stab = str(item_attrs['stability'])
-				if stab != stab.lower():
-					raise InvalidInterface(_('Stability "%s" invalid - use lower case!') % item_attrs.stability)
-				raise InvalidInterface(_('Stability "%s" invalid') % item_attrs['stability'])
-			if stability >= preferred:
-				raise InvalidInterface(_("Upstream can't set stability to preferred!"))
-			impl.upstream_stability = stability
-
-			impl.bindings = bindings
-			impl.requires = depends
-
-			for elem in item.childNodes:
-				if elem.uri != XMLNS_IFACE: continue
-				if elem.name == 'archive':
-					url = elem.getAttribute('href')
-					if not url:
-						raise InvalidInterface(_("Missing href attribute on <archive>"))
-					size = elem.getAttribute('size')
-					if not size:
-						raise InvalidInterface(_("Missing size attribute on <archive>"))
-					impl.add_download_source(url = url, size = int(size),
-							extract = elem.getAttribute('extract'),
-							start_offset = _get_long(elem, 'start-offset'),
-							type = elem.getAttribute('type'))
-				elif elem.name == 'manifest-digest':
-					for aname, avalue in elem.attrs.iteritems():
-						if ' ' not in aname:
-							impl.digests.append('%s=%s' % (aname, avalue))
-				elif elem.name == 'recipe':
-					recipe = Recipe()
-					for recipe_step in elem.childNodes:
-						if recipe_step.uri == XMLNS_IFACE and recipe_step.name == 'archive':
-							url = recipe_step.getAttribute('href')
-							if not url:
-								raise InvalidInterface(_("Missing href attribute on <archive>"))
-							size = recipe_step.getAttribute('size')
-							if not size:
-								raise InvalidInterface(_("Missing size attribute on <archive>"))
-							recipe.steps.append(DownloadSource(None, url = url, size = int(size),
-									extract = recipe_step.getAttribute('extract'),
-									start_offset = _get_long(recipe_step, 'start-offset'),
-									type = recipe_step.getAttribute('type')))
-						elif recipe_step.uri == XMLNS_IFACE and recipe_step.name == 'unpack':
-							path = recipe_step.getAttribute('path')
-							if not path:
-								raise InvalidInterface(_("Missing path attribute on <unpack>"))
-							recipe.steps.append(UnpackArchive(path = path,
-								extract = recipe_step.getAttribute('extract'),
-								type = recipe_step.getAttribute('type')))
-						else:
-							info(_("Unknown step '%s' in recipe; skipping recipe"), recipe_step.name)
-							break
-					else:
-						impl.download_sources.append(recipe)
 
 		root_attrs = {'stability': 'testing'}
 		root_commands = {}
@@ -1075,6 +1303,12 @@ class ZeroInstallFeed(object):
 			root_commands['run'] = Command(qdom.Element(XMLNS_IFACE, 'command', {'path': main}), None)
 		process_group(feed_element, root_attrs, [], [], root_commands)
 	
+	@property
+	def archives(self):
+		'''get all archives in this feed'''
+		from itertools import chain
+		return chain(*[impl.archives for impl in self.implementations.itervalues()])
+			
 	def get_distro_feed(self):
 		"""Does this feed contain any <pacakge-implementation> elements?
 		i.e. is it worth asking the package manager for more information?
@@ -1274,4 +1508,5 @@ def format_version(version):
 		version[x] = '-' + _version_value_to_mod[version[x]]
 	if version[-1] == '-': del version[-1]
 	return ''.join(version)
+
 
