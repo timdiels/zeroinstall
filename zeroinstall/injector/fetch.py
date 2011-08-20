@@ -103,36 +103,23 @@ class Fetcher(object):
 		@see: L{download_impl} uses this method when appropriate"""
 		# Maybe we're taking this metaphor too far?
 
-		# Start downloading all the ingredients.
-		streams = {}	# Streams collected from successful downloads
-
-		# Start a download for each ingredient
-		blockers = []
-		for step in recipe.steps:
-			blocker, stream = self.download_archive(step, force = force, impl_hint = impl_hint)
-			assert stream
-			blockers.append(blocker)
-			streams[step] = stream
-
-		while blockers:
-			yield blockers
-			tasks.check(blockers)
-			blockers = [b for b in blockers if not b.happened]
-
-		from zeroinstall.zerostore import unpack
+		# Start preparing all steps
+		step_commands = [step.prepare(self, force, impl_hint) for step in recipe.steps]
 
 		# Create an empty directory for the new implementation
 		store = stores.stores[0]
 		tmpdir = store.get_tmp_dir_for(required_digest)
+
 		try:
-			# Unpack each of the downloaded archives into it in turn
-			for step in recipe.steps:
-				stream = streams[step]
-				stream.seek(0)
-				unpack.unpack_archive_over(step.url, stream, tmpdir,
-						extract = step.extract,
-						type = step.type,
-						start_offset = step.start_offset or 0)
+			# Run steps
+			valid_blockers = [s.blocker for s in step_commands if s.blocker is not None]
+			for step_command in step_commands:
+				if step_command.blocker:
+					while not step_command.blocker.happened:
+						yield valid_blockers
+						tasks.check(valid_blockers)
+				step_command.run(tmpdir)
+
 			# Check that the result is correct and store it in the cache
 			store.check_manifest_and_rename(required_digest, tmpdir)
 			tmpdir = None

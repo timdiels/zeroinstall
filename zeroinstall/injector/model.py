@@ -19,6 +19,7 @@ from logging import info, debug, warn
 from zeroinstall import SafeException, version
 from zeroinstall.injector.namespaces import XMLNS_IFACE
 from zeroinstall.injector import qdom
+from zeroinstall.zerostore import unpack
 
 # Element names for bindings in feed files
 binding_names = frozenset(['environment', 'overlay'])
@@ -258,6 +259,7 @@ class EnvironmentBinding(Binding):
 		self.default = default
 		self.mode = mode
 		self.value = value
+
 		if separator is None:
 			self.separator = os.pathsep
 		else:
@@ -420,6 +422,56 @@ class DownloadSource(RetrievalMethod):
 		self.extract = extract
 		self.start_offset = start_offset
 		self.type = type		# MIME type - see unpack.py
+
+	def prepare(self, fetcher, force, impl_hint):
+
+		class StepCommand(object):
+			__slots__ = ['blocker', '_stream']
+
+			def __init__(s):
+				s.blocker, s._stream = fetcher.download_archive(self, force = force, impl_hint = impl_hint)
+
+			def run(s, tmpdir):
+				s._stream.seek(0)
+				unpack.unpack_archive_over(self.url, s._stream, tmpdir,
+					extract = self.extract,
+					type = self.type,
+					start_offset = self.start_offset or 0)
+		return StepCommand()
+
+
+class UnpackArchive(object):
+	"""An UnpackArchive step provides unpacks/extracts an archive.
+
+	It can be used inside a Recipe."""
+	__slots__ = ['path', 'extract', 'type']
+
+	def __init__(self, path, extract, type):
+		self.path = path
+		self.extract = extract
+		self.type = type
+
+	def prepare(self, fetcher, force, impl_hint):
+
+		class StepCommand(object):
+			__slots__ = ['blocker']
+
+			def __init__(s):
+				s.blocker = None
+
+			def run(s, tmpdir):
+				path = os.path.join(tmpdir, self.path)
+				stream = open(path, 'rb')
+				stream.seek(0)
+
+				unpack.unpack_archive_over(path, stream, tmpdir,
+					extract = self.extract,
+					type = self.type,
+					start_offset = 0)
+
+				os.unlink(path)
+
+		return StepCommand()
 
 class Recipe(RetrievalMethod):
 	"""Get an implementation by following a series of steps.
@@ -1003,6 +1055,13 @@ class ZeroInstallFeed(object):
 									extract = recipe_step.getAttribute('extract'),
 									start_offset = _get_long(recipe_step, 'start-offset'),
 									type = recipe_step.getAttribute('type')))
+						elif recipe_step.uri == XMLNS_IFACE and recipe_step.name == 'unpack':
+							path = recipe_step.getAttribute('path')
+							if not path:
+								raise InvalidInterface(_("Missing path attribute on <unpack>"))
+							recipe.steps.append(UnpackArchive(path = path,
+								extract = recipe_step.getAttribute('extract'),
+								type = recipe_step.getAttribute('type')))
 						else:
 							info(_("Unknown step '%s' in recipe; skipping recipe"), recipe_step.name)
 							break

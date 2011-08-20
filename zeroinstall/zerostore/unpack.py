@@ -62,7 +62,13 @@ _pola_run = None
 #	info('pola-run not found; archive extraction will not be sandboxed')
 
 def type_from_url(url):
-	"""Guess the MIME type for this resource based on its URL. Returns None if we don't know what it is."""
+	''' 
+	Guess the MIME type for this resource based on its name. 
+
+	Returns None if we don't know what it is.
+
+	@ivar url URL or path to resource
+	'''
 	url = url.lower()
 	if url.endswith('.rpm'): return 'application/x-rpm'
 	if url.endswith('.deb'): return 'application/x-deb'
@@ -197,7 +203,10 @@ def unpack_archive_over(url, data, destdir, extract = None, type = None, start_o
 def unpack_archive(url, data, destdir, extract = None, type = None, start_offset = 0):
 	"""Unpack stream 'data' into directory 'destdir'. If extract is given, extract just
 	that sub-directory from the archive (i.e. destdir/extract will exist afterwards).
-	Works out the format from the name."""
+	Works out the format from the name.
+
+	@ivar archive Path or url to the archive
+	"""
 	if type is None: type = type_from_url(url)
 	if type is None: raise SafeException(_("Unknown extension (and no MIME type given) in '%s'") % url)
 	if type == 'application/x-bzip-compressed-tar':
@@ -223,7 +232,7 @@ def unpack_archive(url, data, destdir, extract = None, type = None, start_offset
 	elif type == 'application/x-ruby-gem':
 		extract_gem(data, destdir, extract, start_offset)
 	else:
-		raise SafeException(_('Unknown MIME type "%(type)s" for "%(url)s"') % {'type': type, 'url': url})
+		raise SafeException(_('Unknown MIME type "%(type)s" for "%(url)s"') % {'type': type, 'url': archive})
 
 def extract_deb(stream, destdir, extract = None, start_offset = 0):
 	if extract:
