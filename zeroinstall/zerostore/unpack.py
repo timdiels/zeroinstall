@@ -232,7 +232,7 @@ def unpack_archive(url, data, destdir, extract = None, type = None, start_offset
 	elif type == 'application/x-ruby-gem':
 		extract_gem(data, destdir, extract, start_offset)
 	else:
-		raise SafeException(_('Unknown MIME type "%(type)s" for "%(url)s"') % {'type': type, 'url': archive})
+		raise SafeException(_('Unknown MIME type "%(type)s" for "%(url)s"') % {'type': type, 'url': url})
 
 def extract_deb(stream, destdir, extract = None, start_offset = 0):
 	if extract:
