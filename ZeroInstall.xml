@@ -45,6 +45,17 @@ requires first uninstalling another.</description>
       </runner>
     </command>
 
+    <environment insert="" name="ZI_HOME" mode="replace" />
+    <environment insert="texttest" name="TEXTTEST_HOME" mode="replace" />
+    <command name="testb" path="tests/testall.py">
+      <runner interface="http://timdiels.be/feeds/texttest.xml">
+        <arg>-g</arg>
+      </runner>
+    </command>
+    <command name="manage-tests" >
+      <runner interface="http://timdiels.be/feeds/texttest.xml"/>
+    </command>
+
     <!-- Also restrict the verison of Python for older 0install and when used as a library. -->
     <requires interface="http://repo.roscidus.com/python/python">
       <version not-before='2.6' before="3"/>

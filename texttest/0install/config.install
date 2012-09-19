@@ -1,0 +1,13 @@
+# Full path to the System Under Test
+executable:$ZI_HOME/0install
+interpreter:python2
+
+# Naming scheme to use for files for stdin,stdout and stderr
+filename_convention_scheme:standard
+
+# Expanded name to use for application
+full_name:0install
+
+# files carried on to the test dir
+link_test_path:server.py
+link_test_path:server.d

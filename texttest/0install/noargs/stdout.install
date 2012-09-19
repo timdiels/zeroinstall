@@ -1,0 +1,21 @@
+Usage: 0install run [OPTIONS] URI [ARGS]
+
+Options:
+  -h, --help            show this help message and exit
+  -c, --console         never use GUI
+  --dry-run             just print what would be executed
+  -g, --gui             show graphical policy editor
+  -v, --verbose         more verbose output
+  --with-store=DIR      add an implementation cache
+  --before=VERSION      choose a version before this
+  --command=COMMAND     command to select
+  --cpu=CPU             target CPU type
+  --message=MESSAGE     message to display when interacting with user
+  --not-before=VERSION  minimum version to choose
+  -o, --offline         try to avoid using the network
+  --os=OS               target operation system type
+  -r, --refresh         refresh all used interfaces
+  -s, --source          select source code
+  -m MAIN, --main=MAIN  name of the file to execute
+  -w COMMAND, --wrapper=COMMAND
+                        execute program using a debugger, etc
